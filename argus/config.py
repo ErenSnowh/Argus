@@ -16,16 +16,54 @@ from __future__ import annotations
 
 import os
 
+# Load .env file manually from the current directory, package directory, or parent directory
+def _load_env():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(base_dir)
+    cwd = os.getcwd()
+    
+    env_paths = [
+        os.path.join(cwd, ".env"),
+        os.path.join(base_dir, ".env"),
+        os.path.join(parent_dir, ".env"),
+    ]
+    
+    seen = set()
+    unique_paths = []
+    for p in env_paths:
+        if p not in seen:
+            seen.add(p)
+            unique_paths.append(p)
+            
+    for env_path in unique_paths:
+        if os.path.isfile(env_path):
+            try:
+                with open(env_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        if "=" in line:
+                            k, v = line.split("=", 1)
+                            k = k.strip()
+                            v = v.strip().strip("'\"")
+                            if k and k not in os.environ:
+                                os.environ[k] = v
+            except Exception:
+                pass
+
+_load_env()
+
 # ---------------------------------------------------------------------------
-# Embedded API key — ships with the repo so anyone can clone-and-run.
-# Override by setting GOOGLE_API_KEY in your environment or .env file.
+# API key is loaded from the environment or a .env file.
 # ---------------------------------------------------------------------------
-_DEFAULT_API_KEY = "AQ.Ab8RN6KhACuXeXzPtb9nYfAt0i8wJwaFIK9JA-pWZC24hGhf1g"
+_DEFAULT_API_KEY = ""
 
 GOOGLE_API_KEY: str = os.environ.get("GOOGLE_API_KEY") or _DEFAULT_API_KEY
 
 # Push into os.environ so the Google GenAI SDK picks it up automatically.
-os.environ.setdefault("GOOGLE_API_KEY", GOOGLE_API_KEY)
+if GOOGLE_API_KEY:
+    os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
 
 
 def has_api_key() -> bool:
@@ -77,6 +115,7 @@ try:
         base_delay = 5
         
         tried_models = [current_model] if current_model else []
+        last_exception = None
         
         while True:
             model_to_use = tried_models[-1] if tried_models else current_model
@@ -86,6 +125,7 @@ try:
                 try:
                     return await _orig_generate_content(self, *curr_args, **curr_kwargs)
                 except Exception as e:
+                    last_exception = e
                     err_msg = str(e)
                     
                     is_daily_limit = (
@@ -151,7 +191,9 @@ try:
                 tried_models.append(next_model)
             else:
                 # No candidates left, raise original exception
-                raise e
+                if last_exception:
+                    raise last_exception
+                raise Exception("Model fallback failed with no captured exception")
 
     async def _patched_generate_content_stream(self, *args, **kwargs):
         current_model = _get_current_model(args, kwargs)
@@ -159,6 +201,7 @@ try:
         base_delay = 5
         
         tried_models = [current_model] if current_model else []
+        last_exception = None
         
         while True:
             model_to_use = tried_models[-1] if tried_models else current_model
@@ -168,6 +211,7 @@ try:
                 try:
                     return await _orig_generate_content_stream(self, *curr_args, **curr_kwargs)
                 except Exception as e:
+                    last_exception = e
                     err_msg = str(e)
                     
                     is_daily_limit = (
@@ -229,7 +273,9 @@ try:
                 sys.stderr.flush()
                 tried_models.append(next_model)
             else:
-                raise e
+                if last_exception:
+                    raise last_exception
+                raise Exception("Model fallback failed with no captured exception")
 
     AsyncModels.generate_content = _patched_generate_content
     AsyncModels.generate_content_stream = _patched_generate_content_stream

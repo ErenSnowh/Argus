@@ -1,0 +1,1137 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ARGUS — Autonomous SOC Co-Pilot</title>
+  <meta name="description"
+    content="ARGUS: A multi-agent SOC co-pilot that detects, enriches, investigates, and reports network intrusions — built with Google ADK, MCP, and security-by-design." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0A0D12;
+      --panel: #12161D;
+      --panel-2: #161B23;
+      --border: #212833;
+      --text: #E7E3D8;
+      --text-muted: #838A96;
+      --cyan: #6FB7C7;
+      --cyan-dim: #3E5A61;
+      --amber: #D98E3F;
+      --red: #C75450;
+      --green: #7FA876;
+      --purple: #9B7BD4;
+      --display: "Space Grotesk", sans-serif;
+      --body: "IBM Plex Sans", sans-serif;
+      --mono: "IBM Plex Mono", monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--body);
+    }
+
+    body {
+      padding: 0 0 64px;
+    }
+
+    a {
+      color: var(--cyan);
+    }
+
+    .wrap {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ---------- header ---------- */
+    header.top {
+      border-bottom: 1px solid var(--border);
+      padding: 28px 0 0;
+    }
+
+    .brandrow {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+
+    .brand h1 {
+      font-family: var(--display);
+      font-weight: 700;
+      font-size: 2.4rem;
+      letter-spacing: 0.04em;
+      margin: 0;
+      color: var(--text);
+    }
+
+    .brand h1 span {
+      color: var(--cyan);
+    }
+
+    .brand p {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin: 6px 0 0;
+      letter-spacing: 0.02em;
+    }
+
+    .statuspill {
+      font-family: var(--mono);
+      font-size: 0.74rem;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 6px 14px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      margin-top: 4px;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+    }
+
+    /* ---------- radar signature ---------- */
+    .radar-section {
+      display: flex;
+      align-items: center;
+      gap: 40px;
+      padding: 28px 0 8px;
+      flex-wrap: wrap;
+    }
+
+    .radar-box {
+      position: relative;
+      width: 220px;
+      height: 220px;
+      flex: 0 0 auto;
+    }
+
+    .radar-caption {
+      flex: 1 1 320px;
+      min-width: 260px;
+    }
+
+    .radar-caption h2 {
+      font-family: var(--display);
+      font-size: 1.05rem;
+      margin: 0 0 8px;
+      color: var(--text);
+    }
+
+    .radar-caption p {
+      color: var(--text-muted);
+      font-size: 0.92rem;
+      line-height: 1.55;
+      margin: 0 0 18px;
+    }
+
+    .legend {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .legend i {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    button.primary {
+      font-family: var(--mono);
+      background: var(--cyan);
+      color: #06141A;
+      border: none;
+      border-radius: 6px;
+      padding: 13px 22px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      transition: transform .12s ease, box-shadow .12s ease;
+    }
+
+    button.primary:hover {
+      box-shadow: 0 0 0 3px var(--cyan-dim);
+    }
+
+    button.primary:active {
+      transform: scale(0.98);
+    }
+
+    button.primary:disabled {
+      opacity: 0.5;
+      cursor: wait;
+    }
+
+    button.primary.live-mode {
+      background: var(--purple);
+      color: #fff;
+    }
+
+    button.primary.live-mode:hover {
+      box-shadow: 0 0 0 3px rgba(155, 123, 212, 0.4);
+    }
+
+    .runrow {
+      margin-top: 16px;
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .runrow .hint {
+      font-family: var(--mono);
+      font-size: 0.74rem;
+      color: var(--text-muted);
+    }
+
+    /* ---------- mode toggle ---------- */
+    .mode-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-top: 12px;
+    }
+
+    .mode-toggle button {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 9px 18px;
+      cursor: pointer;
+      transition: background .15s, color .15s;
+      white-space: nowrap;
+    }
+
+    .mode-toggle button.active {
+      background: var(--cyan);
+      color: #06141A;
+      font-weight: 600;
+    }
+
+    .mode-toggle button.active.live {
+      background: var(--purple);
+      color: #fff;
+    }
+
+    .mode-toggle button:not(.active):hover {
+      background: rgba(111, 183, 199, 0.08);
+    }
+
+    /* ---------- grid + cards ---------- */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-top: 26px;
+    }
+
+    @media (max-width:760px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 22px;
+    }
+
+    .card.full {
+      grid-column: 1 / -1;
+    }
+
+    .card h3 {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin: 0 0 14px;
+    }
+
+    .verdict-row {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .verdict-label {
+      font-family: var(--display);
+      font-size: 1.7rem;
+      font-weight: 700;
+    }
+
+    .verdict-conf {
+      font-family: var(--mono);
+      font-size: 0.95rem;
+      color: var(--text-muted);
+    }
+
+    .badge {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border-radius: 5px;
+      padding: 3px 9px;
+      display: inline-block;
+    }
+
+    .badge.sev-Critical {
+      background: rgba(199, 84, 80, .18);
+      color: var(--red);
+      border: 1px solid rgba(199, 84, 80, .4);
+    }
+
+    .badge.sev-High {
+      background: rgba(217, 142, 63, .18);
+      color: var(--amber);
+      border: 1px solid rgba(217, 142, 63, .4);
+    }
+
+    .badge.sev-Medium {
+      background: rgba(217, 142, 63, .12);
+      color: var(--amber);
+      border: 1px solid rgba(217, 142, 63, .3);
+    }
+
+    .badge.sev-Low {
+      background: rgba(127, 168, 118, .16);
+      color: var(--green);
+      border: 1px solid rgba(127, 168, 118, .35);
+    }
+
+    .probbar-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      margin-top: 6px;
+    }
+
+    .probbar-row .lbl {
+      width: 84px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .probbar-track {
+      flex: 1;
+      height: 6px;
+      background: var(--panel-2);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .probbar-fill {
+      height: 100%;
+      background: var(--cyan);
+    }
+
+    .probbar-row .val {
+      width: 46px;
+      text-align: right;
+      color: var(--text-muted);
+    }
+
+    .kv {
+      font-family: var(--mono);
+      font-size: 0.84rem;
+      line-height: 1.7;
+      color: var(--text);
+    }
+
+    .kv b {
+      color: var(--cyan);
+    }
+
+    .muted {
+      color: var(--text-muted);
+    }
+
+    ul.steps {
+      margin: 6px 0 0;
+      padding-left: 18px;
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+
+    ul.steps li {
+      margin-bottom: 4px;
+    }
+
+    .approval-note {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--amber);
+      border-top: 1px dashed var(--border);
+      margin-top: 12px;
+      padding-top: 10px;
+    }
+
+    .report-md {
+      font-family: var(--mono);
+      font-size: 0.83rem;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      color: var(--text);
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px;
+      max-height: 420px;
+      overflow: auto;
+    }
+
+    .stat-row {
+      display: flex;
+      gap: 28px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .stat {
+      font-family: var(--mono);
+    }
+
+    .stat .num {
+      font-size: 1.6rem;
+      font-weight: 600;
+      color: var(--cyan);
+    }
+
+    .stat .lbl {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .audit-line {
+      font-family: var(--mono);
+      font-size: 0.74rem;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      padding: 6px 0;
+    }
+
+    .audit-line b {
+      color: var(--text);
+    }
+
+    .audit-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .verify-btn {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      border-radius: 5px;
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+
+    .verify-btn:hover {
+      border-color: var(--cyan);
+      color: var(--cyan);
+    }
+
+    .placeholder {
+      color: var(--text-muted);
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      padding: 18px 0;
+    }
+
+    footer {
+      margin-top: 48px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    /* ---------- live stream panel ---------- */
+    .stream-panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 22px;
+      margin-top: 26px;
+    }
+
+    .stream-panel h3 {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin: 0 0 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .stream-content {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      line-height: 1.7;
+      max-height: 600px;
+      overflow: auto;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .stream-event {
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(33, 40, 51, 0.6);
+    }
+
+    .stream-event:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .stream-event .agent-tag {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-weight: 600;
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-bottom: 6px;
+    }
+
+    .stream-event .agent-tag.triage {
+      background: rgba(111, 183, 199, 0.15);
+      color: var(--cyan);
+    }
+
+    .stream-event .agent-tag.enrichment {
+      background: rgba(217, 142, 63, 0.15);
+      color: var(--amber);
+    }
+
+    .stream-event .agent-tag.forensics {
+      background: rgba(127, 168, 118, 0.15);
+      color: var(--green);
+    }
+
+    .stream-event .agent-tag.remediation {
+      background: rgba(199, 84, 80, 0.15);
+      color: var(--red);
+    }
+
+    .stream-event .agent-tag.report {
+      background: rgba(155, 123, 212, 0.15);
+      color: var(--purple);
+    }
+
+    .stream-event .agent-tag.system {
+      background: rgba(131, 138, 150, 0.15);
+      color: var(--text-muted);
+    }
+
+    .stream-event .agent-tag.default {
+      background: rgba(111, 183, 199, 0.1);
+      color: var(--cyan);
+    }
+
+    .stream-event .tool-call {
+      background: rgba(111, 183, 199, 0.06);
+      border: 1px solid rgba(111, 183, 199, 0.15);
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-top: 4px;
+      font-size: 0.78rem;
+      color: var(--cyan);
+    }
+
+    .stream-event .text-content {
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    @keyframes pulse-dot {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.3;
+      }
+    }
+
+    .live-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--purple);
+      display: inline-block;
+      animation: pulse-dot 1.2s infinite;
+    }
+
+    .live-badge {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      background: rgba(155, 123, 212, 0.15);
+      color: var(--purple);
+      border: 1px solid rgba(155, 123, 212, 0.3);
+      border-radius: 4px;
+      padding: 2px 7px;
+      letter-spacing: 0.04em;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+
+    <header class="top">
+      <div class="brandrow">
+        <div class="brand">
+          <h1>ARG<span>U</span>S</h1>
+          <p>AUTONOMOUS RESPONSE &amp; GUARDED UNIFIED SECURITY · MULTI-AGENT SOC CO-PILOT</p>
+        </div>
+        <div class="statuspill"><span class="dot"></span><span id="status-text">checking backend…</span></div>
+      </div>
+
+      <div class="radar-section">
+        <div class="radar-box"><canvas id="radar" width="220" height="220"></canvas></div>
+        <div class="radar-caption">
+          <h2>One hundred eyes on the wire.</h2>
+          <p>Every investigation ARGUS runs lands on the scope below — closer to center means
+            higher severity. Click <b>Run Investigation</b> to feed the swarm a fresh synthetic flow
+            and watch triage, enrichment, forensics, and remediation happen in one pass.</p>
+          <div class="legend">
+            <span><i style="background:var(--green)"></i>Low / Benign</span>
+            <span><i style="background:var(--amber)"></i>Medium / High</span>
+            <span><i style="background:var(--red)"></i>Critical</span>
+          </div>
+
+          <div class="sandbox-panel"
+            style="margin-bottom: 22px; border-top: 1px solid var(--border); padding-top: 18px; text-align: left;">
+            <h3
+              style="font-family: var(--mono); font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 12px; font-weight: normal;">
+              Sandbox Parameters</h3>
+            <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+              <div style="flex: 2; min-width: 160px;">
+                <input type="text" id="sandbox-ip" placeholder="suspect IP: e.g. 45.137.21.9"
+                  style="width: 100%; padding: 7px 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: var(--mono); font-size: 0.78rem;">
+              </div>
+              <div style="flex: 1; min-width: 160px;">
+                <label
+                  style="font-size: 0.78rem; color: var(--text); display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
+                  <input type="checkbox" id="sandbox-pcap" checked style="cursor: pointer; width: 14px; height: 14px;">
+                  Analyze PCAP Forensics
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="mode-toggle" id="mode-toggle">
+            <button class="active" data-mode="offline" id="mode-offline">⚡ Offline Pipeline</button>
+            <button data-mode="live" id="mode-live">🧠 Live Agent (Gemini)</button>
+          </div>
+
+          <div class="runrow">
+            <button class="primary" id="run-btn">Run Investigation</button>
+            <span class="hint" id="mode-hint">instant · deterministic · no API calls</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Live agent streaming panel (hidden by default) -->
+    <div class="stream-panel" id="stream-panel" style="display:none;">
+      <h3><span class="live-dot"></span> Live Agent Stream <span class="live-badge">GEMINI</span></h3>
+      <div class="stream-content" id="stream-content">
+        <span class="placeholder">Waiting for live agent output…</span>
+      </div>
+    </div>
+
+    <section class="grid" id="results" style="display:none;">
+      <div class="card">
+        <h3>Detection — Triage Agent</h3>
+        <div class="verdict-row">
+          <div class="verdict-label" id="det-label">—</div>
+          <div class="verdict-conf" id="det-conf"></div>
+        </div>
+        <div id="det-probs" style="margin-top:14px;"></div>
+      </div>
+
+      <div class="card">
+        <h3>MITRE ATT&amp;CK Mapping</h3>
+        <div class="kv" id="attack-card"><span class="placeholder">Run an investigation to populate.</span></div>
+      </div>
+
+      <div class="card">
+        <h3>Threat Intel — Enrichment Agent</h3>
+        <div class="kv" id="ioc-card"><span class="placeholder">Run an investigation to populate.</span></div>
+      </div>
+
+      <div class="card">
+        <h3>Forensics Agent — PCAP Summary</h3>
+        <div class="kv" id="forensics-card"><span class="placeholder">Run an investigation to populate.</span></div>
+      </div>
+
+      <div class="card full">
+        <h3>Remediation Agent — Proposed Playbook</h3>
+        <div id="playbook-card"><span class="placeholder">Run an investigation to populate.</span></div>
+      </div>
+
+      <div class="card full">
+        <h3>Report Agent — Incident Report</h3>
+        <div class="report-md" id="report-md">Run an investigation to populate.</div>
+      </div>
+    </section>
+
+    <section class="grid" style="margin-top:30px;">
+      <div class="card">
+        <h3>Detector Performance</h3>
+        <div id="metrics-card"><span class="placeholder">Loading model metrics…</span></div>
+      </div>
+
+      <div class="card">
+        <h3>Audit Log — Hash-Chained Trail</h3>
+        <div class="audit-actions">
+          <span class="muted" style="font-family:var(--mono);font-size:0.74rem;">last 8 agent actions</span>
+          <button class="verify-btn" id="verify-btn">verify chain integrity</button>
+        </div>
+        <div id="audit-log"><span class="placeholder">No actions logged yet.</span></div>
+      </div>
+    </section>
+
+    <footer>
+      <span>ARGUS · built for the Kaggle 5-Day AI Agents Intensive capstone</span>
+      <span>Detection → ATT&amp;CK → Enrichment → Forensics → Playbook → Report, every step audited.</span>
+    </footer>
+  </div>
+
+  <script>
+    const API = "";
+    let currentMode = "offline"; // "offline" or "live"
+
+    function fmtPct(x) { return (x * 100).toFixed(1) + "%"; }
+
+    function severityColor(sev) {
+      if (sev === "Critical") return getComputedStyle(document.documentElement).getPropertyValue('--red');
+      if (sev === "High" || sev === "Medium") return getComputedStyle(document.documentElement).getPropertyValue('--amber');
+      return getComputedStyle(document.documentElement).getPropertyValue('--green');
+    }
+
+    function agentTagClass(author) {
+      const a = (author || "").toLowerCase();
+      if (a.includes("triage")) return "triage";
+      if (a.includes("enrichment")) return "enrichment";
+      if (a.includes("forensics")) return "forensics";
+      if (a.includes("remediation")) return "remediation";
+      if (a.includes("report")) return "report";
+      if (a === "system") return "system";
+      return "default";
+    }
+
+    /* ---------------- mode toggle ---------------- */
+    document.querySelectorAll('.mode-toggle button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.mode-toggle button').forEach(b => b.classList.remove('active', 'live'));
+        btn.classList.add('active');
+        if (btn.dataset.mode === 'live') btn.classList.add('live');
+        currentMode = btn.dataset.mode;
+
+        const runBtn = document.getElementById('run-btn');
+        const hint = document.getElementById('mode-hint');
+        if (currentMode === 'live') {
+          runBtn.textContent = "Run Live Investigation";
+          runBtn.classList.add('live-mode');
+          hint.textContent = "real Gemini agents · SSE streaming · may take 30-60s";
+        } else {
+          runBtn.textContent = "Run Investigation";
+          runBtn.classList.remove('live-mode');
+          hint.textContent = "instant · deterministic · no API calls";
+        }
+      });
+    });
+
+    /* ---------------- radar canvas ---------------- */
+    const canvas = document.getElementById('radar');
+    const ctx = canvas.getContext('2d');
+    const cx = 110, cy = 110, maxR = 95;
+    let sweepAngle = 0;
+    let blips = []; // {angle, radius, color, born}
+
+    function drawRadar() {
+      ctx.clearRect(0, 0, 220, 220);
+      ctx.save();
+      ctx.translate(cx, cy);
+
+      // rings
+      ctx.strokeStyle = "rgba(111,183,199,0.18)";
+      ctx.lineWidth = 1;
+      for (let r = maxR / 4; r <= maxR; r += maxR / 4) {
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+      }
+      // crosshair
+      ctx.beginPath(); ctx.moveTo(-maxR, 0); ctx.lineTo(maxR, 0);
+      ctx.moveTo(0, -maxR); ctx.lineTo(0, maxR); ctx.stroke();
+
+      // sweep gradient
+      ctx.save();
+      ctx.rotate(sweepAngle);
+      const lg = ctx.createLinearGradient(0, 0, maxR, 0);
+      lg.addColorStop(0, "rgba(111,183,199,0.55)");
+      lg.addColorStop(1, "rgba(111,183,199,0)");
+      ctx.fillStyle = lg;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, maxR, -0.18, 0.18);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      // blips
+      const now = performance.now();
+      blips = blips.filter(b => now - b.born < 14000);
+      for (const b of blips) {
+        const age = (now - b.born) / 14000;
+        const alpha = 1 - age;
+        const x = Math.cos(b.angle) * b.radius;
+        const y = Math.sin(b.angle) * b.radius;
+        ctx.beginPath();
+        ctx.fillStyle = b.color;
+        ctx.globalAlpha = Math.max(alpha, 0.08);
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.restore();
+      sweepAngle += 0.018;
+      requestAnimationFrame(drawRadar);
+    }
+    requestAnimationFrame(drawRadar);
+
+    function addBlip(severity) {
+      const radiusBySeverity = { Critical: maxR * 0.25, High: maxR * 0.5, Medium: maxR * 0.65, Low: maxR * 0.85 };
+      const r = radiusBySeverity[severity] ?? maxR * 0.85;
+      blips.push({
+        angle: Math.random() * Math.PI * 2,
+        radius: r + (Math.random() * 10 - 5),
+        color: severityColor(severity),
+        born: performance.now(),
+      });
+    }
+
+    /* ---------------- API wiring ---------------- */
+    async function checkHealth() {
+      try {
+        const r = await fetch(API + "/api/health");
+        const d = await r.json();
+        document.getElementById('status-text').textContent = d.model_trained ? "model loaded · ready" : "model not trained";
+      } catch (e) {
+        document.getElementById('status-text').textContent = "backend unreachable";
+      }
+    }
+
+    async function checkConfig() {
+      try {
+        const r = await fetch(API + "/api/config");
+        const d = await r.json();
+        if (d.has_api_key) {
+          document.getElementById('mode-live').style.display = '';
+        }
+      } catch (e) { }
+    }
+
+    async function loadMetrics() {
+      try {
+        const r = await fetch(API + "/api/metrics");
+        if (!r.ok) throw new Error();
+        const m = await r.json();
+        const el = document.getElementById('metrics-card');
+        el.innerHTML = `
+      <div class="stat-row">
+        <div class="stat"><div class="num">${fmtPct(m.accuracy)}</div><div class="lbl">accuracy</div></div>
+        <div class="stat"><div class="num">${fmtPct(m.macro_f1)}</div><div class="lbl">macro F1</div></div>
+        <div class="stat"><div class="num">${m.n_train + m.n_test}</div><div class="lbl">flows (train+test)</div></div>
+      </div>
+      <div class="kv muted">Top features: ${m.top_features.slice(0, 5).map(f => f.feature).join(", ")}</div>
+    `;
+      } catch (e) {
+        document.getElementById('metrics-card').innerHTML = '<span class="placeholder">Model not trained yet. Run <code>python scripts/train_model.py</code>.</span>';
+      }
+    }
+
+    async function loadAudit() {
+      try {
+        const r = await fetch(API + "/api/audit/tail?n=8");
+        const d = await r.json();
+        const el = document.getElementById('audit-log');
+        if (!d.entries || d.entries.length === 0) {
+          el.innerHTML = '<span class="placeholder">No actions logged yet — run an investigation.</span>';
+          return;
+        }
+        el.innerHTML = d.entries.slice().reverse().map(e =>
+          `<div class="audit-line"><b>${e.agent_role}</b> · ${e.event_type} · ${JSON.stringify(e.detail)}</div>`
+        ).join("");
+      } catch (e) { }
+    }
+
+    document.getElementById('verify-btn').addEventListener('click', async () => {
+      const r = await fetch(API + "/api/audit/verify");
+      const d = await r.json();
+      alert(d.valid ? "Audit log hash chain VALID — no tampering detected." : "WARNING: audit log hash chain BROKEN.");
+    });
+
+    function renderResult(d) {
+      document.getElementById('results').style.display = '';
+      document.getElementById('det-label').textContent = d.triage.predicted_label;
+      document.getElementById('det-conf').textContent = "confidence " + fmtPct(d.triage.confidence);
+
+      const probs = Object.entries(d.triage.class_probabilities).sort((a, b) => b[1] - a[1]);
+      document.getElementById('det-probs').innerHTML = probs.map(([lbl, p]) => `
+    <div class="probbar-row">
+      <div class="lbl">${lbl}</div>
+      <div class="probbar-track"><div class="probbar-fill" style="width:${(p * 100).toFixed(1)}%"></div></div>
+      <div class="val">${fmtPct(p)}</div>
+    </div>
+  `).join("");
+
+      const a = d.attack_mapping;
+      document.getElementById('attack-card').innerHTML = a ? `
+    <div><b>${a.technique_id}</b> — ${a.technique_name}</div>
+    <div class="muted" style="margin:6px 0;">Tactic: ${a.tactic}</div>
+    <div style="font-family:var(--body);font-size:0.88rem;color:var(--text);margin-top:8px;">${a.description}</div>
+  ` : `<span class="placeholder">No ATT&CK mapping — detection was benign.</span>`;
+
+      const ioc = d.ioc_result;
+      document.getElementById('ioc-card').innerHTML = ioc ? `
+    <div>indicator: <b>${ioc.indicator}</b></div>
+    <div>verdict: <b style="color:${severityColor(ioc.verdict === 'malicious' ? 'Critical' : (ioc.verdict === 'suspicious' ? 'Medium' : 'Low'))}">${ioc.verdict}</b></div>
+    <div>votes: ${ioc.malicious_votes} · categories: ${ioc.categories.join(", ") || "none"}</div>
+    <div class="muted">source: ${ioc.source}</div>
+  ` : `<span class="placeholder">No IOC enrichment performed — detection was benign.</span>`;
+
+      const f = d.forensics_result;
+      document.getElementById('forensics-card').innerHTML = (f && !f.error) ? `
+    <div>file: <b>${f.file}</b></div>
+    <div>packets: ${f.packet_count} · bytes: ${f.total_bytes} · duration: ${f.duration_sec}s</div>
+    <div>unique dst ports: ${f.unique_dst_ports_contacted}</div>
+    <div class="muted">protocol mix: ${JSON.stringify(f.protocol_mix)}</div>
+  ` : `<span class="placeholder">No forensics performed — detection was benign.</span>`;
+
+      const pb = d.playbook;
+      document.getElementById('playbook-card').innerHTML = pb ? `
+    <div style="margin-bottom:10px;"><span class="badge sev-${pb.severity}">${pb.severity} severity</span></div>
+    <ul class="steps">${pb.steps.map(s => `<li>${s}</li>`).join("")}</ul>
+  ` : `<span class="placeholder">No remediation needed — detection was benign.</span>`;
+
+      document.getElementById('report-md').textContent = d.report_markdown;
+
+      addBlip(pb ? pb.severity : "Low");
+      loadAudit();
+    }
+
+    /* -------------- live streaming investigation -------------- */
+    async function runLiveInvestigation() {
+      const btn = document.getElementById('run-btn');
+      const streamPanel = document.getElementById('stream-panel');
+      const streamContent = document.getElementById('stream-content');
+
+      btn.disabled = true;
+      btn.textContent = "agents working…";
+      streamPanel.style.display = '';
+      streamContent.innerHTML = '<span class="placeholder" style="padding:0;">Connecting to Gemini agent swarm…</span>';
+
+      // Hide offline results during live run
+      document.getElementById('results').style.display = 'none';
+
+      try {
+        const suspect_ip = document.getElementById('sandbox-ip').value.trim() || null;
+        const use_sample_pcap = document.getElementById('sandbox-pcap').checked;
+
+        const resp = await fetch(API + "/api/investigate/live", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            suspect_ip: suspect_ip,
+            use_sample_pcap: use_sample_pcap
+          })
+        });
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let firstEvent = true;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop(); // keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr) continue;
+
+            try {
+              const event = JSON.parse(jsonStr);
+
+              if (firstEvent) {
+                streamContent.innerHTML = '';
+                firstEvent = false;
+              }
+
+              // Check for completion
+              if (event.text === "[DONE]") {
+                const doneEl = document.createElement('div');
+                doneEl.className = 'stream-event';
+                doneEl.innerHTML = '<div class="agent-tag system">✓ complete</div><div class="text-content muted">All agents finished. Investigation complete.</div>';
+                streamContent.appendChild(doneEl);
+                addBlip("High");
+                continue;
+              }
+
+              const el = document.createElement('div');
+              el.className = 'stream-event';
+
+              const tagClass = agentTagClass(event.author);
+              let html = `<div class="agent-tag ${tagClass}">${event.author || '?'}</div>`;
+
+              if (event.text) {
+                html += `<div class="text-content">${escapeHtml(event.text)}</div>`;
+              }
+              if (event.tool_call) {
+                html += `<div class="tool-call">→ ${event.tool_call.name}(${JSON.stringify(event.tool_call.args).slice(0, 200)})</div>`;
+              }
+
+              el.innerHTML = html;
+              streamContent.appendChild(el);
+              streamContent.scrollTop = streamContent.scrollHeight;
+            } catch (parseErr) { }
+          }
+        }
+      } catch (e) {
+        streamContent.innerHTML += `<div class="stream-event"><div class="agent-tag system">error</div><div class="text-content" style="color:var(--red)">Connection error: ${escapeHtml(String(e))}</div></div>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Run Live Investigation";
+        loadAudit();
+      }
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    /* -------------- offline investigation -------------- */
+    async function runOfflineInvestigation() {
+      const btn = document.getElementById('run-btn');
+      btn.disabled = true; btn.textContent = "investigating…";
+      document.getElementById('stream-panel').style.display = 'none';
+      try {
+        const suspect_ip = document.getElementById('sandbox-ip').value.trim() || null;
+        const use_sample_pcap = document.getElementById('sandbox-pcap').checked;
+        const r = await fetch(API + "/api/investigate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            suspect_ip: suspect_ip,
+            use_sample_pcap: use_sample_pcap
+          })
+        });
+        const d = await r.json();
+        renderResult(d);
+      } catch (e) {
+        alert("Investigation failed — is the backend running?");
+      } finally {
+        btn.disabled = false; btn.textContent = "Run Investigation";
+      }
+    }
+
+    /* -------------- run button -------------- */
+    document.getElementById('run-btn').addEventListener('click', () => {
+      if (currentMode === 'live') {
+        runLiveInvestigation();
+      } else {
+        runOfflineInvestigation();
+      }
+    });
+
+    checkHealth();
+    checkConfig();
+    loadMetrics();
+    loadAudit();
+  </script>
+</body>
+
+</html>

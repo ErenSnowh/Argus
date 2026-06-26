@@ -1,0 +1,19 @@
+# Local dev convenience -- mirrors `docker run` from the repo's Dockerfile
+# but also shows how you'd run the MCP server as its own long-lived service
+# if you wanted ADK agents in a separate container/process to connect to it
+# over HTTP/SSE instead of spawning it over stdio per-session.
+#
+# Usage: docker compose -f deploy/docker-compose.yml up --build
+
+services:
+  dashboard:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - VIRUSTOTAL_API_KEY=${VIRUSTOTAL_API_KEY:-}
+    # No GOOGLE_API_KEY here on purpose -- the dashboard serves the offline
+    # deterministic pipeline only. Run agents/run_live.py locally (outside
+    # this compose file) for the live Gemini-backed agent pipeline.

@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "argus-soc-agent"
+version = "0.1.0"
+description = "ARGUS: a multi-agent SOC co-pilot built with Google ADK + MCP for the Kaggle 5-Day AI Agents Intensive capstone"
+requires-python = ">=3.10"
+dependencies = [
+    "google-adk>=2.0",
+    "mcp>=1.0",
+    "scikit-learn>=1.4",
+    "pandas>=2.0",
+    "numpy>=1.26",
+    "scapy>=2.5",
+    "joblib>=1.3",
+    "httpx>=0.27",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
+
+[project.scripts]
+argus = "cli.argus_cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools]
+packages = ["agents", "cli", "mcp_server", "ml", "security"]

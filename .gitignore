@@ -1,0 +1,15 @@
+venv/
+.venv/
+argus/__pycache__/
+argus/*.pyc
+argus/.pytest_cache/
+argus/*.egg-info/
+argus/build/
+argus/dist/
+argus/.env
+argus/*.env.local
+argus/ml/artifacts/
+argus/data/audit_log.jsonl
+.DS_Store
+.vscode/
+.idea/

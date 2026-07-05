@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "ARGUS: a multi-agent SOC co-pilot built with Google ADK + MCP for the Kaggle 5-Day AI Agents Intensive capstone"
 requires-python = ">=3.10"
 dependencies = [
-    "google-adk>=2.0",
+    "google-adk>=1.0",
     "mcp>=1.0",
     "scikit-learn>=1.4",
     "pandas>=2.0",
@@ -17,7 +17,8 @@ dependencies = [
     "joblib>=1.3",
     "httpx>=0.27",
     "fastapi>=0.110",
-    "uvicorn>=0.29",
+    "uvicorn[standard]>=0.29",
+    "python-multipart>=0.0.9",
 ]
 
 [project.scripts]

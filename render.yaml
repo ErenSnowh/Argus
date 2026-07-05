@@ -1,0 +1,28 @@
+# Render deployment configuration for ARGUS SOC Co-Pilot
+# https://render.com/docs/render-yaml-reference
+#
+# Deploy: connect your GitHub repo to Render, select "Use render.yaml",
+# and it will pick this up automatically. Set GOOGLE_API_KEY in Render's
+# Environment → Secret Files or Environment Variables panel.
+
+services:
+  - type: web
+    name: argus-soc-agent
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # Build context is the repo root so argus/ is accessible
+    dockerContext: .
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      # Set this in Render's dashboard → Environment → Secret Files
+      - key: GOOGLE_API_KEY
+        sync: false          # tells Render this must be supplied externally
+      # Optional: VirusTotal key for live IOC enrichment
+      - key: VIRUSTOTAL_API_KEY
+        value: ""            # leave blank for demo/offline mode
+      # Model selection (free tier friendly defaults)
+      - key: GOOGLE_GENAI_FAST_MODEL
+        value: gemini-2.5-flash-lite
+      - key: GOOGLE_GENAI_DEEP_MODEL
+        value: gemini-2.5-flash

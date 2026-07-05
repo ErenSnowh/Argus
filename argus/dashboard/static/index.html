@@ -645,10 +645,72 @@
       padding: 2px 7px;
       letter-spacing: 0.04em;
     }
+    /* ---------- toast notifications ---------- */
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .toast {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      padding: 11px 18px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      max-width: 360px;
+      animation: slideIn .2s ease;
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }
+
+    .toast.error {
+      border-color: rgba(199,84,80,0.5);
+      background: rgba(199,84,80,0.12);
+      color: var(--red);
+    }
+
+    .toast.success {
+      border-color: rgba(127,168,118,0.5);
+      background: rgba(127,168,118,0.1);
+      color: var(--green);
+    }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ---------- cancel stream button ---------- */
+    .cancel-btn {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      background: none;
+      border: 1px solid rgba(199,84,80,0.4);
+      color: var(--red);
+      border-radius: 5px;
+      padding: 4px 10px;
+      cursor: pointer;
+      margin-left: auto;
+    }
+    .cancel-btn:hover { background: rgba(199,84,80,0.1); }
   </style>
 </head>
 
 <body>
+  <!-- Toast notification container -->
+  <div class="toast-container" id="toast-container"></div>
+
   <div class="wrap">
 
     <header class="top">
@@ -774,7 +836,26 @@
 
   <script>
     const API = "";
-    let currentMode = "offline"; // "offline" or "live"
+    let currentMode = "offline";
+    let liveStreamController = null; // AbortController for live stream
+
+    /* ---------- utility ---------- */
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    /* ---------- toast system ---------- */
+    function showToast(message, type = 'info', durationMs = 4000) {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+      const icon = type === 'error' ? '✗' : type === 'success' ? '✓' : 'ℹ';
+      toast.innerHTML = `<span>${icon}</span><span>${escapeHtml(message)}</span>`;
+      container.appendChild(toast);
+      setTimeout(() => toast.remove(), durationMs);
+    }
 
     function fmtPct(x) { return (x * 100).toFixed(1) + "%"; }
 
@@ -890,10 +971,18 @@
     async function checkHealth() {
       try {
         const r = await fetch(API + "/api/health");
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const d = await r.json();
-        document.getElementById('status-text').textContent = d.model_trained ? "model loaded · ready" : "model not trained";
+        const el = document.getElementById('status-text');
+        if (d.model_trained) {
+          el.textContent = "model loaded · ready";
+        } else {
+          el.textContent = "model not trained — run train_model.py";
+          showToast("Model not trained. Run: python scripts/train_model.py", "error", 6000);
+        }
       } catch (e) {
         document.getElementById('status-text').textContent = "backend unreachable";
+        showToast("Backend unreachable. Is the server running?", "error", 6000);
       }
     }
 
@@ -929,22 +1018,39 @@
     async function loadAudit() {
       try {
         const r = await fetch(API + "/api/audit/tail?n=8");
+        if (!r.ok) return;
         const d = await r.json();
         const el = document.getElementById('audit-log');
         if (!d.entries || d.entries.length === 0) {
           el.innerHTML = '<span class="placeholder">No actions logged yet — run an investigation.</span>';
           return;
         }
-        el.innerHTML = d.entries.slice().reverse().map(e =>
-          `<div class="audit-line"><b>${e.agent_role}</b> · ${e.event_type} · ${JSON.stringify(e.detail)}</div>`
-        ).join("");
-      } catch (e) { }
+        el.innerHTML = d.entries.slice().reverse().map(e => {
+          const ts = new Date(e.ts * 1000).toLocaleTimeString();
+          const roleColor = {
+            triage_agent: 'var(--cyan)',
+            enrichment_agent: 'var(--amber)',
+            forensics_agent: 'var(--green)',
+            remediation_agent: 'var(--red)',
+            report_agent: 'var(--purple)',
+          }[e.agent_role] || 'var(--text-muted)';
+          return `<div class="audit-line"><span style="color:var(--text-muted);">${ts}</span> · <b style="color:${roleColor}">${e.agent_role}</b> · ${e.event_type} · ${escapeHtml(JSON.stringify(e.detail))}</div>`;
+        }).join("");
+      } catch (e) { /* silent */ }
     }
 
     document.getElementById('verify-btn').addEventListener('click', async () => {
-      const r = await fetch(API + "/api/audit/verify");
-      const d = await r.json();
-      alert(d.valid ? "Audit log hash chain VALID — no tampering detected." : "WARNING: audit log hash chain BROKEN.");
+      try {
+        const r = await fetch(API + "/api/audit/verify");
+        const d = await r.json();
+        if (d.valid) {
+          showToast("Audit log hash chain VALID — no tampering detected.", "success");
+        } else {
+          showToast("WARNING: Audit log hash chain BROKEN — possible tampering!", "error", 8000);
+        }
+      } catch (e) {
+        showToast("Could not verify audit chain: " + e.message, "error");
+      }
     });
 
     function renderResult(d) {
@@ -1002,12 +1108,26 @@
       const streamPanel = document.getElementById('stream-panel');
       const streamContent = document.getElementById('stream-content');
 
+      // Add cancel button to stream panel header
+      const streamHeader = streamPanel.querySelector('h3');
+      let cancelBtn = streamPanel.querySelector('.cancel-btn');
+      if (!cancelBtn) {
+        cancelBtn = document.createElement('button');
+        cancelBtn.className = 'cancel-btn';
+        cancelBtn.textContent = 'cancel';
+        streamHeader.appendChild(cancelBtn);
+      }
+
+      liveStreamController = new AbortController();
+      cancelBtn.onclick = () => {
+        liveStreamController.abort();
+        showToast("Live investigation cancelled.", "error");
+      };
+
       btn.disabled = true;
       btn.textContent = "agents working…";
       streamPanel.style.display = '';
       streamContent.innerHTML = '<span class="placeholder" style="padding:0;">Connecting to Gemini agent swarm…</span>';
-
-      // Hide offline results during live run
       document.getElementById('results').style.display = 'none';
 
       try {
@@ -1020,7 +1140,8 @@
           body: JSON.stringify({
             suspect_ip: suspect_ip,
             use_sample_pcap: use_sample_pcap
-          })
+          }),
+          signal: liveStreamController.signal,
         });
 
         const reader = resp.body.getReader();
@@ -1079,18 +1200,18 @@
           }
         }
       } catch (e) {
-        streamContent.innerHTML += `<div class="stream-event"><div class="agent-tag system">error</div><div class="text-content" style="color:var(--red)">Connection error: ${escapeHtml(String(e))}</div></div>`;
+        if (e.name === 'AbortError') {
+          streamContent.innerHTML += `<div class="stream-event"><div class="agent-tag system">cancelled</div><div class="text-content muted">Investigation was cancelled by user.</div></div>`;
+        } else {
+          streamContent.innerHTML += `<div class="stream-event"><div class="agent-tag system">error</div><div class="text-content" style="color:var(--red)">Connection error: ${escapeHtml(String(e))}</div></div>`;
+          showToast("Live investigation failed: " + e.message, "error");
+        }
       } finally {
         btn.disabled = false;
         btn.textContent = "Run Live Investigation";
+        liveStreamController = null;
         loadAudit();
       }
-    }
-
-    function escapeHtml(str) {
-      const div = document.createElement('div');
-      div.textContent = str;
-      return div.innerHTML;
     }
 
     /* -------------- offline investigation -------------- */
@@ -1109,10 +1230,16 @@
             use_sample_pcap: use_sample_pcap
           })
         });
+        if (!r.ok) {
+          const errText = await r.text();
+          throw new Error(`HTTP ${r.status}: ${errText.slice(0,200)}`);
+        }
         const d = await r.json();
         renderResult(d);
+        showToast("Investigation complete — " + d.triage.predicted_label + " detected.", "success");
       } catch (e) {
-        alert("Investigation failed — is the backend running?");
+        showToast("Investigation failed: " + e.message, "error", 6000);
+        console.error(e);
       } finally {
         btn.disabled = false; btn.textContent = "Run Investigation";
       }

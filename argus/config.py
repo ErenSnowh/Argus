@@ -83,12 +83,14 @@ try:
     from google.genai.models import AsyncModels
 
     # Order of fallback models
+    # Ordered fallback list — all names are real, stable Gemini model IDs.
+    # "gemini-3.1-flash-lite" was a typo (that model does not exist).
     ALL_CANDIDATE_MODELS = [
-        "gemini-3.1-flash-lite",
+        "gemini-2.0-flash-lite",
         "gemini-2.5-flash-lite",
         "gemini-2.0-flash",
         "gemini-2.5-flash",
-        "gemini-flash-latest"
+        "gemini-1.5-flash",
     ]
 
     _orig_generate_content = AsyncModels.generate_content
@@ -178,22 +180,26 @@ try:
                     # If retries exhausted on this model, break loop to fallback
                     break
             
-            # Find next model in candidate list to try
+            # Find next untried model in candidate list
             next_model = None
             for candidate in ALL_CANDIDATE_MODELS:
                 if candidate not in tried_models:
                     next_model = candidate
                     break
-            
+
             if next_model:
-                sys.stderr.write(f"\n[ARGUS SDK PATCH] Falling back from {model_to_use} to {next_model}\n")
+                sys.stderr.write(
+                    f"\n[ARGUS SDK PATCH] Falling back from {model_to_use} to {next_model}\n"
+                )
                 sys.stderr.flush()
                 tried_models.append(next_model)
+                # continue outer while loop with the new model
             else:
-                # No candidates left, raise original exception
+                # All candidates exhausted — raise and EXIT the loop
                 if last_exception:
                     raise last_exception
-                raise Exception("Model fallback failed with no captured exception")
+                raise Exception("Model fallback failed: all candidates exhausted")
+                # The raise above exits the while loop; no need for a break.
 
     async def _patched_generate_content_stream(self, *args, **kwargs):
         current_model = _get_current_model(args, kwargs)
@@ -262,20 +268,25 @@ try:
                     
                     break
             
+            # Find next untried model in candidate list
             next_model = None
             for candidate in ALL_CANDIDATE_MODELS:
                 if candidate not in tried_models:
                     next_model = candidate
                     break
-            
+
             if next_model:
-                sys.stderr.write(f"\n[ARGUS SDK PATCH] Falling back stream from {model_to_use} to {next_model}\n")
+                sys.stderr.write(
+                    f"\n[ARGUS SDK PATCH] Falling back stream from {model_to_use} to {next_model}\n"
+                )
                 sys.stderr.flush()
                 tried_models.append(next_model)
+                # continue outer while loop with the new model
             else:
+                # All candidates exhausted — raise and EXIT the loop
                 if last_exception:
                     raise last_exception
-                raise Exception("Model fallback failed with no captured exception")
+                raise Exception("Model fallback failed: all stream candidates exhausted")
 
     AsyncModels.generate_content = _patched_generate_content
     AsyncModels.generate_content_stream = _patched_generate_content_stream

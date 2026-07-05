@@ -1,0 +1,41 @@
+# Docker build context exclusions — keeps the image lean and build fast
+
+# Python artifacts
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache/
+**/*.egg-info/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Version control
+.git/
+.gitignore
+
+# IDE and OS
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# Local env files (secrets must come via Render env vars, never baked in)
+**/.env
+!argus/.env.example
+
+# Dev-only docs/notes
+docs/
+*.md
+
+# CI configs
+.github/
+
+# Trained ML artifacts if present locally (will be rebuilt in Docker)
+argus/ml/artifacts/*.joblib
+
+# Local PCAP data (will be generated in Docker)
+argus/data/*.pcap

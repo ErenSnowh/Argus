@@ -25,7 +25,9 @@ from google.adk.agents.llm_agent import LlmAgent
 from agents.mcp_connection import toolset_for
 
 FAST_MODEL = os.environ.get("GOOGLE_GENAI_FAST_MODEL", "gemini-2.5-flash-lite")
-DEEP_MODEL = os.environ.get("GOOGLE_GENAI_DEEP_MODEL", "gemini-2.5-flash-lite")
+# DEEP_MODEL is used only by report_agent where synthesis quality > latency.
+# Default to gemini-2.5-flash (better than lite, free-tier accessible).
+DEEP_MODEL = os.environ.get("GOOGLE_GENAI_DEEP_MODEL", "gemini-2.5-flash")
 
 
 def _tools(role: str) -> list:

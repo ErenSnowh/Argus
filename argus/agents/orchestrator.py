@@ -1,27 +1,29 @@
 """
 orchestrator.py
 -----------------
-Composes the five ARGUS sub-agents into a multi-agent pipeline using ADK's
-native workflow agents -- this is the "Agent / Multi-agent system (ADK)" key
-concept artifact for the capstone rubric.
+Composes the six ARGUS sub-agents into a multi-agent pipeline using ADK's
+native workflow agents.
 
 Pipeline shape:
 
     incoming flow / pcap / IOC
             |
             v
-      [triage_agent]                (classify + ATT&CK lookup, decides escalation)
+      [triage_agent]                (classify + explainability + threat score + correlation)
             |
             v
    [ParallelAgent] -----------------------
        |                                 |
    [enrichment_agent]              [forensics_agent]   (run concurrently --
-   (IOC reputation)                 (pcap / file hash)  independent evidence
-       |                                 |              streams, no shared state
-        ---------------------------------
+   (IOC reputation + scoring)       (deep PCAP forensics: independent evidence
+       |                            DNS tunneling,       streams, no shared state)
+        --------------------------------- beaconing, payload)
             |
             v
      [remediation_agent]           (propose-only playbook, human approval required)
+            |
+            v
+     [compliance_agent]            (CERT-In compliant report, India 6-hour mandate)
             |
             v
        [report_agent]              (pure synthesis, zero tool access)
@@ -37,6 +39,7 @@ from google.adk.agents.parallel_agent import ParallelAgent
 from google.adk.agents.sequential_agent import SequentialAgent
 
 from agents.sub_agents import (
+    compliance_agent,
     enrichment_agent,
     forensics_agent,
     remediation_agent,
@@ -53,8 +56,10 @@ evidence_gathering = ParallelAgent(
 argus_pipeline = SequentialAgent(
     name="argus_soc_pipeline",
     description=(
-        "ARGUS end-to-end SOC pipeline: triage -> parallel evidence gathering "
-        "(enrichment + forensics) -> remediation proposal -> incident report."
+        "ARGUS end-to-end SOC pipeline: triage (with threat scoring + correlation) "
+        "-> parallel evidence gathering (enrichment + deep forensics) "
+        "-> remediation proposal -> CERT-In compliance report -> incident report."
     ),
-    sub_agents=[triage_agent, evidence_gathering, remediation_agent, report_agent],
+    sub_agents=[triage_agent, evidence_gathering, remediation_agent, compliance_agent, report_agent],
 )
+

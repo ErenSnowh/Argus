@@ -25,7 +25,8 @@ dependencies = [
 argus = "cli.argus_cli:main"
 
 [project.optional-dependencies]
+world_model = ["torch>=2.0"]
 dev = ["pytest>=8.0"]
 
 [tool.setuptools]
-packages = ["agents", "cli", "mcp_server", "ml", "security"]
+packages = ["agents", "cli", "mcp_server", "ml", "ml.world_model", "security"]

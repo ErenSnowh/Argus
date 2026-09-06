@@ -33,6 +33,8 @@ _SEVERITY_BY_LABEL = {
     "BruteForce": "Medium",
     "WebAttack": "High",
     "PortScan": "Low",
+    "LateralMovement": "High",
+    "Exfiltration": "Critical",
 }
 
 

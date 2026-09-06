@@ -30,8 +30,9 @@ COPY argus/ argus/
 # Set PYTHONPATH so all internal imports (config, agents, ml, etc.) resolve
 ENV PYTHONPATH=/app/argus
 
-# Bake a trained model + sample PCAP into the image for zero-setup demo
+# Bake a trained model + sample PCAP + dataset fixtures into the image for zero-setup demo
 RUN python argus/scripts/make_sample_pcap.py && \
+    python argus/scripts/generate_sample_datasets.py && \
     python argus/scripts/train_model.py --fast
 
 EXPOSE 8000

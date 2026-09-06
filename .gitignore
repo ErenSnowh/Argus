@@ -11,6 +11,8 @@ argus/.env
 argus/*.env.local
 argus/ml/artifacts/
 argus/data/audit_log.jsonl
+argus/data/knowledge_cache/*.json
+!argus/data/knowledge_cache/.gitkeep
 .DS_Store
 .vscode/
 .idea/

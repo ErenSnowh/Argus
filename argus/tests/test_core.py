@@ -14,6 +14,7 @@ docstring and README "Testing" section for how to validate that layer.
 
 from __future__ import annotations
 
+import hashlib
 import sys
 import tempfile
 from pathlib import Path
@@ -124,12 +125,30 @@ def test_pcap_summary_missing_file():
 
 def test_verify_file_hash_eicar_positive_control():
     eicar = rb"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+    try:
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(eicar)
+            path = f.name
+        result = verify_file_hash(path)
+        if "error" in result:
+            pytest.skip(f"Host antivirus intercepted EICAR fixture: {result['error']}")
+        assert result["match_found"] is True
+        assert sha256_file(Path(path)) == result["sha256"]
+    except OSError as e:
+        pytest.skip(f"Host antivirus blocked EICAR write: {e}")
+
+
+def test_verify_file_hash_custom():
+    content = b"ARGUS-SOC-BENIGN-TEST-PAYLOAD"
     with tempfile.NamedTemporaryFile(delete=False) as f:
-        f.write(eicar)
+        f.write(content)
         path = f.name
-    result = verify_file_hash(path)
+    digest = hashlib.sha256(content).hexdigest()
+    custom_dict = {digest: "Argus-Test-Signature"}
+    result = verify_file_hash(path, known_malicious_hashes=custom_dict)
     assert result["match_found"] is True
-    assert sha256_file(Path(path)) == result["sha256"]
+    assert result["match_label"] == "Argus-Test-Signature"
+    assert result["sha256"] == digest
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +261,12 @@ def test_dashboard_health_endpoint(api_client):
     assert data["status"] == "ok"
 
 
+def test_dashboard_favicon_endpoint(api_client):
+    resp = api_client.get("/favicon.ico")
+    assert resp.status_code == 200
+    assert "svg" in resp.headers["content-type"]
+
+
 def test_dashboard_investigate_returns_full_pipeline(api_client):
     resp = api_client.post("/api/investigate", json={})
     assert resp.status_code == 200
@@ -257,3 +282,200 @@ def test_dashboard_audit_verify_returns_valid_chain(api_client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["valid"] is True
+
+
+# ---------------------------------------------------------------------------
+# World Model tests
+# ---------------------------------------------------------------------------
+
+def test_world_model_feature_schema():
+    """Verify the world model feature schema covers flow + packet level."""
+    from ml.world_model.features import (
+        WORLD_MODEL_FEATURES, FLOW_FEATURE_COLUMNS, PACKET_LEVEL_COLUMNS,
+        NUM_FEATURES, ATTACK_LABELS, ATTACK_STAGE_INDEX,
+    )
+    # All flow features should be in the world model schema
+    for col in FLOW_FEATURE_COLUMNS:
+        assert col in WORLD_MODEL_FEATURES, f"Flow feature {col} missing"
+
+    # Packet-level features should be present
+    for col in PACKET_LEVEL_COLUMNS:
+        assert col in WORLD_MODEL_FEATURES, f"Packet feature {col} missing"
+
+    assert NUM_FEATURES == len(WORLD_MODEL_FEATURES)
+    assert len(ATTACK_LABELS) == len(ATTACK_STAGE_INDEX)
+    assert "LateralMovement" in ATTACK_LABELS
+    assert "Exfiltration" in ATTACK_LABELS
+
+
+def test_temporal_dataset_generation():
+    """Verify synthetic temporal sequences have correct shape and structure."""
+    from ml.world_model.features import (
+        generate_temporal_dataset, NUM_FEATURES, NUM_ATTACK_STAGES,
+    )
+    X, y_labels, y_inf = generate_temporal_dataset(n_sequences=20, seq_len=8, seed=42)
+
+    assert X.shape == (20, 8, NUM_FEATURES)
+    assert y_labels.shape == (20, 8)
+    assert y_inf.shape == (20, 8)
+
+    # Labels should be valid stage indices
+    assert y_labels.min() >= 0
+    assert y_labels.max() < NUM_ATTACK_STAGES
+
+    # Infiltration flags should be binary
+    assert set(y_inf.flatten().tolist()) <= {0.0, 1.0}
+
+
+def test_dataset_loader_train_test_split():
+    """Verify temporal train/test split preserves ordering."""
+    from ml.world_model.dataset_loader import load_dataset, train_test_split_temporal
+
+    X, y_labels, y_inf = load_dataset("synthetic", n_sequences=50, seq_len=10)
+    (X_train, _, _), (X_test, _, _) = train_test_split_temporal(X, y_labels, y_inf, test_ratio=0.2)
+
+    assert X_train.shape[0] + X_test.shape[0] == 50
+    assert X_train.shape[0] == 40  # 80% train
+    assert X_test.shape[0] == 10   # 20% test
+
+
+def test_world_model_feature_vector_generation():
+    """Verify single feature vectors match expected shape."""
+    import numpy as np
+    from ml.world_model.features import _generate_flow_vector, NUM_FEATURES, ATTACK_LABELS
+
+    rng = np.random.default_rng(42)
+    for label in ATTACK_LABELS:
+        vec = _generate_flow_vector(label, rng)
+        assert vec.shape == (NUM_FEATURES,)
+        assert (vec >= 0).all(), f"Negative feature value for {label}"
+
+
+def test_attack_scenarios_coverage():
+    """Verify attack scenarios cover diverse kill-chain patterns."""
+    from ml.world_model.features import ATTACK_SCENARIOS, ATTACK_LABELS
+
+    all_labels_in_scenarios = set()
+    for scenario in ATTACK_SCENARIOS:
+        for label in scenario:
+            all_labels_in_scenarios.add(label)
+
+    # At least BENIGN and a few attack types should be represented
+    assert "BENIGN" in all_labels_in_scenarios
+    assert len(all_labels_in_scenarios) >= 5
+
+
+def test_mitre_mapping_includes_new_stages():
+    """Verify LateralMovement and Exfiltration have MITRE mappings."""
+    from mcp_server.mitre_mapping import map_to_attack
+
+    lateral = map_to_attack("LateralMovement")
+    assert lateral is not None
+    assert lateral.technique_id == "T1021"
+    assert lateral.tactic == "Lateral Movement"
+
+    exfil = map_to_attack("Exfiltration")
+    assert exfil is not None
+    assert exfil.technique_id == "T1041"
+    assert exfil.tactic == "Exfiltration"
+
+
+def test_flow_features_includes_new_generators():
+    """Verify LateralMovement and Exfiltration generators exist and work."""
+    from ml.flow_features import GENERATORS, FEATURE_COLUMNS
+
+    assert "LateralMovement" in GENERATORS
+    assert "Exfiltration" in GENERATORS
+
+    # Test generation
+    for label in ["LateralMovement", "Exfiltration"]:
+        df = GENERATORS[label](10)
+        assert len(df) == 10
+        assert df["label"].iloc[0] == label
+        for col in FEATURE_COLUMNS:
+            assert col in df.columns
+
+
+def test_guardrails_allowlist_includes_forecast_tools():
+    """Verify triage_agent can access forecast_infiltration."""
+    from security.guardrails import enforce_allowlist
+
+    enforce_allowlist("triage_agent", "forecast_infiltration")
+    enforce_allowlist("triage_agent", "get_world_model_status")
+    enforce_allowlist("enrichment_agent", "forecast_infiltration")
+
+
+def test_dashboard_world_model_status_endpoint(api_client):
+    """Verify the world model status API returns valid response."""
+    resp = api_client.get("/api/world-model/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "model_trained" in data
+
+
+def test_dashboard_investigate_includes_forecast(api_client):
+    """Verify investigation results include forecast data."""
+    resp = api_client.post("/api/investigate", json={})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "triage" in data
+    # Forecast field should be present (may be None if model not trained)
+    assert "forecast" in data
+
+
+def test_load_all_8_datasets():
+    """Verify all 8 public and synthetic datasets load cleanly into unified (S_t, S_t+1) tensors."""
+    from ml.world_model.dataset_loader import DATASET_REGISTRY, load_dataset
+    from ml.world_model.features import NUM_FEATURES
+
+    expected_datasets = [
+        "synthetic", "cicids2018", "cicids2017", "unsw_nb15",
+        "ctu13", "ciciot2023", "lanl", "darpa"
+    ]
+    for name in expected_datasets:
+        assert name in DATASET_REGISTRY, f"Dataset {name} missing from registry"
+        X, y_labels, y_inf = load_dataset(name, n_sequences=5, max_rows=30)
+        assert X.ndim == 3, f"{name}: X must be 3D tensor"
+        assert X.shape[2] == NUM_FEATURES, f"{name}: feature dim must match {NUM_FEATURES}"
+        assert y_labels.ndim == 2, f"{name}: y_labels must be 2D tensor"
+        assert y_inf.ndim == 2, f"{name}: y_inf must be 2D tensor"
+
+
+def test_generate_nciipc_report():
+    """Verify NCIIPC CII statutory incident report formatting and routing."""
+    from mcp_server.nciipc_report import generate_nciipc_report
+
+    rep = generate_nciipc_report(
+        predicted_label="DDoS",
+        confidence=0.98,
+        cii_sector="Power & Energy",
+        suspect_ips=["185.220.101.45"],
+        affected_ips=["10.240.1.15"],
+    )
+    assert rep.report_id.startswith("NCIIPC-CII-PWR-")
+    assert rep.cii_sector == "Power & Energy"
+    assert rep.criticality_tier == "Tier-1 (Crown Jewel)"
+    assert rep.nciipc_submission_email == "helpdesk1@nciipc.gov.in"
+    assert rep.containment_sla == "< 15 Minutes"
+    assert "Section 70 / 70A" in rep.report_markdown
+    assert "helpdesk1@nciipc.gov.in" in rep.nciipc_email_draft
+
+
+def test_dashboard_nciipc_generate_endpoint(api_client):
+    """Verify /api/nciipc/generate produces valid CII advisory."""
+    resp = api_client.post("/api/nciipc/generate", json={"sector": "Banking, Financial Services & Insurance (BFSI)"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["cii_sector"] == "Banking, Financial Services & Insurance (BFSI)"
+    assert data["report_id"].startswith("NCIIPC-CII-BFSI-")
+    assert data["nciipc_submission_email"] == "helpdesk1@nciipc.gov.in"
+
+
+def test_dashboard_datasets_sample_endpoint(api_client):
+    """Verify /api/datasets/sample returns real telemetry rows for supported datasets."""
+    resp = api_client.get("/api/datasets/sample?source=unsw_nb15&limit=5")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["source"] == "unsw_nb15"
+    assert len(data["rows"]) == 5
+    assert data["feature_count"] == 38

@@ -76,11 +76,12 @@ def redact(text: str, keep_ips: bool = True) -> tuple[str, list[str]]:
 # ---------------------------------------------------------------------------
 
 TOOL_ALLOWLISTS: dict[str, set[str]] = {
-    "triage_agent": {"classify_flow", "lookup_mitre_attack"},
-    "enrichment_agent": {"enrich_ioc", "verify_file_hash", "lookup_mitre_attack"},
+    "triage_agent": {"classify_flow", "classify_flow_explained", "lookup_mitre_attack", "compute_threat_score", "correlate_alerts", "forecast_infiltration", "get_world_model_status", "list_supported_datasets", "get_knowledge_base_status", "generate_nciipc_report"},
+    "enrichment_agent": {"enrich_ioc", "verify_file_hash", "lookup_mitre_attack", "compute_threat_score", "forecast_infiltration", "enrich_with_knowledge_base", "lookup_cve_nvd", "lookup_attack_technique_detail"},
     "forensics_agent": {"analyze_pcap_summary", "verify_file_hash"},
     "report_agent": set(),  # pure synthesis agent -- no tool access at all
     "remediation_agent": {"propose_playbook"},  # never gets "execute_playbook"
+    "compliance_agent": {"generate_certin_report", "generate_nciipc_report"},  # Statutory compliance reporting (CERT-In + NCIIPC)
 }
 
 

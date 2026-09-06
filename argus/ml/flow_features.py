@@ -51,7 +51,7 @@ FEATURE_COLUMNS = [
     "down_up_ratio",
 ]
 
-LABELS = ["BENIGN", "DDoS", "PortScan", "BruteForce", "WebAttack", "Botnet"]
+LABELS = ["BENIGN", "DDoS", "PortScan", "BruteForce", "WebAttack", "Botnet", "LateralMovement", "Exfiltration"]
 
 _RNG = np.random.default_rng(42)
 
@@ -256,6 +256,81 @@ GENERATORS = {
     "WebAttack": _web_attack,
     "Botnet": _botnet,
 }
+
+
+def _lateral_movement(n: int) -> pd.DataFrame:
+    """Lateral movement: SMB/RDP-style flows between internal hosts.
+    Characterised by moderate-duration, moderate-volume flows targeting
+    a small number of internal services (ports 445, 3389, 22)."""
+    return pd.DataFrame(
+        {
+            "flow_duration_ms": _RNG.normal(500, 200, n).clip(20),
+            "total_fwd_packets": _RNG.poisson(8, n) + 2,
+            "total_bwd_packets": _RNG.poisson(7, n) + 2,
+            "total_fwd_bytes": _RNG.normal(900, 300, n).clip(60),
+            "total_bwd_bytes": _RNG.normal(800, 300, n).clip(60),
+            "fwd_packet_len_mean": _RNG.normal(110, 40, n).clip(20),
+            "fwd_packet_len_std": _RNG.normal(25, 10, n).clip(0),
+            "bwd_packet_len_mean": _RNG.normal(115, 40, n).clip(20),
+            "bwd_packet_len_std": _RNG.normal(28, 12, n).clip(0),
+            "flow_bytes_per_sec": _RNG.normal(3400, 1200, n).clip(50),
+            "flow_packets_per_sec": _RNG.normal(30, 12, n).clip(1),
+            "flow_iat_mean": _RNG.normal(30, 12, n).clip(0.1),
+            "flow_iat_std": _RNG.normal(10, 5, n).clip(0),
+            "fwd_iat_mean": _RNG.normal(28, 10, n).clip(0.1),
+            "bwd_iat_mean": _RNG.normal(32, 12, n).clip(0.1),
+            "syn_flag_count": _RNG.poisson(2, n),
+            "ack_flag_count": _RNG.poisson(7, n),
+            "rst_flag_count": _RNG.poisson(0.5, n),
+            "psh_flag_count": _RNG.poisson(5, n),
+            "fin_flag_count": _RNG.poisson(1, n),
+            "unique_dst_ports_per_src": _RNG.poisson(3, n) + 1,
+            "packets_per_flow": _RNG.poisson(15, n) + 2,
+            "avg_packet_size": _RNG.normal(112, 35, n).clip(20),
+            "down_up_ratio": _RNG.normal(0.88, 0.15, n).clip(0.05),
+            "label": "LateralMovement",
+        }
+    )
+
+
+def _exfiltration(n: int) -> pd.DataFrame:
+    """Exfiltration: large outbound data transfer with asymmetric ratio.
+    Characterised by very high fwd_bytes, low bwd_bytes, and extended
+    duration — the attacker is uploading stolen data."""
+    return pd.DataFrame(
+        {
+            "flow_duration_ms": _RNG.normal(3000, 1500, n).clip(100),
+            "total_fwd_packets": _RNG.poisson(20, n) + 5,
+            "total_bwd_packets": _RNG.poisson(5, n) + 1,
+            "total_fwd_bytes": _RNG.normal(15000, 6000, n).clip(500),
+            "total_bwd_bytes": _RNG.normal(400, 150, n).clip(20),
+            "fwd_packet_len_mean": _RNG.normal(750, 200, n).clip(40),
+            "fwd_packet_len_std": _RNG.normal(150, 60, n).clip(0),
+            "bwd_packet_len_mean": _RNG.normal(80, 25, n).clip(20),
+            "bwd_packet_len_std": _RNG.normal(15, 8, n).clip(0),
+            "flow_bytes_per_sec": _RNG.normal(5000, 2000, n).clip(100),
+            "flow_packets_per_sec": _RNG.normal(8, 3, n).clip(0.5),
+            "flow_iat_mean": _RNG.normal(150, 60, n).clip(1),
+            "flow_iat_std": _RNG.normal(50, 20, n).clip(0),
+            "fwd_iat_mean": _RNG.normal(100, 40, n).clip(1),
+            "bwd_iat_mean": _RNG.normal(600, 200, n).clip(10),
+            "syn_flag_count": _RNG.poisson(1, n),
+            "ack_flag_count": _RNG.poisson(15, n),
+            "rst_flag_count": _RNG.poisson(0.1, n),
+            "psh_flag_count": _RNG.poisson(12, n),
+            "fin_flag_count": _RNG.poisson(1, n),
+            "unique_dst_ports_per_src": _RNG.poisson(1, n) + 1,
+            "packets_per_flow": _RNG.poisson(25, n) + 5,
+            "avg_packet_size": _RNG.normal(600, 180, n).clip(30),
+            "down_up_ratio": _RNG.normal(0.04, 0.03, n).clip(0.001),
+            "label": "Exfiltration",
+        }
+    )
+
+
+# Add the new generators to the mapping
+GENERATORS["LateralMovement"] = _lateral_movement
+GENERATORS["Exfiltration"] = _exfiltration
 
 
 def generate_dataset(

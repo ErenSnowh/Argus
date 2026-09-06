@@ -101,6 +101,38 @@ TECHNIQUE_MAP: dict[str, AttackMapping] = {
             "Run YARA / Volatility memory analysis for known C2 implants",
         ],
     ),
+    "LateralMovement": AttackMapping(
+        tactic="Lateral Movement",
+        technique_id="T1021",
+        technique_name="Remote Services (SMB/RDP/SSH)",
+        description=(
+            "Internal-to-internal connection pattern targeting administrative "
+            "services (SMB 445, RDP 3389, SSH 22) - consistent with an attacker "
+            "pivoting through the network after initial compromise."
+        ),
+        recommended_controls=[
+            "Verify if the source host is compromised - run memory forensics",
+            "Review authentication logs on the target host for anomalous logins",
+            "Segment the network to contain lateral spread",
+            "Deploy honeypots on unused internal hosts to detect further pivoting",
+        ],
+    ),
+    "Exfiltration": AttackMapping(
+        tactic="Exfiltration",
+        technique_id="T1041",
+        technique_name="Exfiltration Over C2 Channel",
+        description=(
+            "Asymmetric flow pattern with high outbound volume and low inbound - "
+            "consistent with bulk data exfiltration over an established C2 channel "
+            "or direct upload to an external staging server."
+        ),
+        recommended_controls=[
+            "Immediately block the destination IP/domain at the perimeter",
+            "Identify what data was accessed - review DLP and file access logs",
+            "Preserve network captures for forensic analysis",
+            "Report to CERT-In as a data breach incident within 6 hours",
+        ],
+    ),
 }
 
 

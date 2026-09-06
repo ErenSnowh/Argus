@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a1a;stop-opacity:1"/>
+      <stop offset="50%" style="stop-color:#0d1b2a;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#1b2838;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#00d4ff"/>
+      <stop offset="50%" style="stop-color:#7c3aed"/>
+      <stop offset="100%" style="stop-color:#ff6b6b"/>
+    </linearGradient>
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#00d4ff"/>
+      <stop offset="100%" style="stop-color:#7c3aed"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="300" fill="url(#bg)" rx="12"/>
+
+  <!-- Grid pattern -->
+  <g opacity="0.06" stroke="#00d4ff" stroke-width="0.5">
+    <line x1="0" y1="50" x2="1200" y2="50"/>
+    <line x1="0" y1="100" x2="1200" y2="100"/>
+    <line x1="0" y1="150" x2="1200" y2="150"/>
+    <line x1="0" y1="200" x2="1200" y2="200"/>
+    <line x1="0" y1="250" x2="1200" y2="250"/>
+    <line x1="100" y1="0" x2="100" y2="300"/>
+    <line x1="200" y1="0" x2="200" y2="300"/>
+    <line x1="300" y1="0" x2="300" y2="300"/>
+    <line x1="400" y1="0" x2="400" y2="300"/>
+    <line x1="500" y1="0" x2="500" y2="300"/>
+    <line x1="600" y1="0" x2="600" y2="300"/>
+    <line x1="700" y1="0" x2="700" y2="300"/>
+    <line x1="800" y1="0" x2="800" y2="300"/>
+    <line x1="900" y1="0" x2="900" y2="300"/>
+    <line x1="1000" y1="0" x2="1000" y2="300"/>
+    <line x1="1100" y1="0" x2="1100" y2="300"/>
+  </g>
+
+  <!-- Decorative circles -->
+  <circle cx="150" cy="150" r="80" fill="none" stroke="#00d4ff" stroke-width="0.5" opacity="0.1"/>
+  <circle cx="150" cy="150" r="120" fill="none" stroke="#7c3aed" stroke-width="0.3" opacity="0.08"/>
+  <circle cx="1050" cy="150" r="80" fill="none" stroke="#ff6b6b" stroke-width="0.5" opacity="0.1"/>
+  <circle cx="1050" cy="150" r="120" fill="none" stroke="#7c3aed" stroke-width="0.3" opacity="0.08"/>
+
+  <!-- Radar sweep at left -->
+  <g transform="translate(150, 150)" opacity="0.15">
+    <circle r="60" fill="none" stroke="#00d4ff" stroke-width="1"/>
+    <circle r="40" fill="none" stroke="#00d4ff" stroke-width="0.5"/>
+    <circle r="20" fill="none" stroke="#00d4ff" stroke-width="0.5"/>
+    <line x1="0" y1="-60" x2="0" y2="60" stroke="#00d4ff" stroke-width="0.3"/>
+    <line x1="-60" y1="0" x2="60" y2="0" stroke="#00d4ff" stroke-width="0.3"/>
+    <!-- Blips -->
+    <circle cx="25" cy="-18" r="3" fill="#ff6b6b" opacity="0.8"/>
+    <circle cx="-15" cy="30" r="2" fill="#fbbf24" opacity="0.6"/>
+    <circle cx="40" cy="10" r="2.5" fill="#00d4ff" opacity="0.7"/>
+  </g>
+
+  <!-- Neural network nodes at right -->
+  <g transform="translate(1050, 150)" opacity="0.12">
+    <circle cx="-40" cy="-30" r="4" fill="#7c3aed"/>
+    <circle cx="-40" cy="0" r="4" fill="#7c3aed"/>
+    <circle cx="-40" cy="30" r="4" fill="#7c3aed"/>
+    <circle cx="0" cy="-15" r="4" fill="#00d4ff"/>
+    <circle cx="0" cy="15" r="4" fill="#00d4ff"/>
+    <circle cx="40" cy="0" r="4" fill="#ff6b6b"/>
+    <line x1="-36" y1="-30" x2="-4" y2="-15" stroke="#7c3aed" stroke-width="0.8"/>
+    <line x1="-36" y1="-30" x2="-4" y2="15" stroke="#7c3aed" stroke-width="0.5"/>
+    <line x1="-36" y1="0" x2="-4" y2="-15" stroke="#7c3aed" stroke-width="0.5"/>
+    <line x1="-36" y1="0" x2="-4" y2="15" stroke="#7c3aed" stroke-width="0.8"/>
+    <line x1="-36" y1="30" x2="-4" y2="-15" stroke="#7c3aed" stroke-width="0.5"/>
+    <line x1="-36" y1="30" x2="-4" y2="15" stroke="#7c3aed" stroke-width="0.8"/>
+    <line x1="4" y1="-15" x2="36" y2="0" stroke="#00d4ff" stroke-width="0.8"/>
+    <line x1="4" y1="15" x2="36" y2="0" stroke="#00d4ff" stroke-width="0.8"/>
+  </g>
+
+  <!-- Accent line -->
+  <rect x="300" y="145" width="600" height="2" fill="url(#accent)" rx="1" opacity="0.3"/>
+
+  <!-- Eye icon -->
+  <g transform="translate(600, 100)" filter="url(#glow)">
+    <ellipse cx="0" cy="0" rx="35" ry="20" fill="none" stroke="url(#textGrad)" stroke-width="2"/>
+    <circle cx="0" cy="0" r="10" fill="none" stroke="#00d4ff" stroke-width="1.5"/>
+    <circle cx="0" cy="0" r="4" fill="#00d4ff"/>
+  </g>
+
+  <!-- Title -->
+  <text x="600" y="175" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="56" font-weight="700" fill="url(#textGrad)" filter="url(#glow)" letter-spacing="12">ARGUS</text>
+
+  <!-- Subtitle -->
+  <text x="600" y="210" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="14" fill="#8892a0" letter-spacing="4" font-weight="300">AUTONOMOUS ATTACK FORECASTING</text>
+
+  <!-- Tagline -->
+  <text x="600" y="240" text-anchor="middle" font-family="'Segoe UI', system-ui, -apple-system, sans-serif" font-size="11" fill="#5a6577" letter-spacing="2">MULTI-AGENT SOC CO-PILOT · WORLD MODEL · SIH 2026</text>
+
+  <!-- Bottom accent -->
+  <rect x="350" y="260" width="500" height="1" fill="url(#accent)" rx="0.5" opacity="0.2"/>
+
+  <!-- Version badge -->
+  <g transform="translate(600, 278)">
+    <rect x="-45" y="-10" width="90" height="18" rx="9" fill="#7c3aed" opacity="0.15"/>
+    <text x="0" y="3" text-anchor="middle" font-family="'Segoe UI', monospace" font-size="10" fill="#7c3aed" letter-spacing="1">v0.1.0</text>
+  </g>
+</svg>

@@ -423,6 +423,17 @@ def test_dashboard_investigate_includes_forecast(api_client):
     assert "forecast" in data
 
 
+def test_dashboard_benchmark_endpoint(api_client):
+    """Verify /api/benchmark returns 200 and benchmark baseline comparison."""
+    resp = api_client.get("/api/benchmark")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "logistic_regression" in data
+    assert "world_model" in data
+    assert "accuracy" in data["logistic_regression"]
+
+
+
 def test_load_all_8_datasets():
     """Verify all 8 public and synthetic datasets load cleanly into unified (S_t, S_t+1) tensors."""
     from ml.world_model.dataset_loader import DATASET_REGISTRY, load_dataset

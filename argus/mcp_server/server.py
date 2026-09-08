@@ -48,7 +48,11 @@ from ml.threat_score import compute_threat_score as _compute_threat_score
 from ml.correlation import correlate_alerts as _correlate_alerts
 from mcp_server.certin_report import generate_certin_report as _generate_certin_report
 from mcp_server.nciipc_report import generate_nciipc_report as _generate_nciipc_report
-from ml.world_model.predictor import forecast_infiltration as _forecast_infiltration, get_predictor as _get_predictor
+from ml.world_model.predictor import (
+    forecast_infiltration as _forecast_infiltration,
+    forecast_infiltration_counterfactual as _forecast_counterfactual,
+    get_predictor as _get_predictor,
+)
 from mcp_server.knowledge_base import (
     enrich_detection_with_kb as _enrich_kb,
     lookup_attack_technique as _lookup_technique,
@@ -353,6 +357,31 @@ def forecast_infiltration(
         "k_steps": k_steps,
         "risk_level": result.get("risk_level"),
         "max_prob": result.get("max_infiltration_prob"),
+    })
+    return result
+
+
+@mcp.tool()
+def forecast_counterfactual(
+    flow_features: dict,
+    k_steps: int = 5,
+    actions: list[str] | None = None,
+) -> dict:
+    """Run action-conditioned counterfactual forward simulation for SOC decision support.
+
+    Evaluates defensive interventions (e.g. BLOCK_SRC, BLOCK_DST_PORT, THROTTLE)
+    against the baseline forward rollout, returning side-by-side risk trajectories,
+    computed risk deltas, and the recommended proactive mitigation action.
+    """
+    result = _forecast_counterfactual(
+        flow_features=flow_features,
+        k_steps=k_steps,
+        actions=actions,
+    )
+    _audit("forecast_counterfactual", {
+        "k_steps": k_steps,
+        "recommended_action": result.get("recommended_action"),
+        "best_risk_reduction": result.get("best_risk_reduction"),
     })
     return result
 

@@ -79,8 +79,27 @@ PACKET_LEVEL_COLUMNS = [
     "retransmission_count",
 ]
 
+# Topology-derived features (P1-B: lightweight graph signals without full GNN)
+# These capture host-to-host communication patterns critical for detecting
+# lateral movement (T1021), internal reconnaissance (T1046), and propagation.
+TOPOLOGY_FEATURE_COLUMNS = [
+    "src_fanout",              # Unique destinations contacted by source
+    "dst_fanin",               # Unique sources contacting destination
+    "unique_dst_hosts",        # Distinct destination IPs in window
+    "unique_src_hosts",        # Distinct source IPs in window
+    "new_host_edges",          # New host-to-host connections not seen before
+    "cross_subnet_edges",      # Connections crossing /24 subnet boundaries
+    "new_dst_ports",           # Newly observed destination ports in window
+    "connection_repetition",   # Repeated connection attempts to same dst
+]
+
 # Full world model feature set
-WORLD_MODEL_FEATURES = FLOW_FEATURE_COLUMNS + EXTENDED_FLOW_COLUMNS + PACKET_LEVEL_COLUMNS
+WORLD_MODEL_FEATURES = (
+    FLOW_FEATURE_COLUMNS
+    + EXTENDED_FLOW_COLUMNS
+    + PACKET_LEVEL_COLUMNS
+    + TOPOLOGY_FEATURE_COLUMNS
+)
 
 # All attack labels including new stages for full kill-chain coverage
 ATTACK_LABELS = [
@@ -155,6 +174,11 @@ def _generate_flow_vector(label: str, rng: np.random.Generator) -> np.ndarray:
             "tcp_window_mean": (65535, 5000), "tcp_window_std": (1000, 500),
             "ip_fragment_flag_count": (0, 0.1), "payload_size_mean": (430, 90),
             "payload_size_std": (80, 30), "retransmission_count": (0.5, 0.5),
+            # Topology features — benign: low diversity, few new edges
+            "src_fanout": (2, 1), "dst_fanin": (2, 1),
+            "unique_dst_hosts": (3, 1.5), "unique_src_hosts": (2, 1),
+            "new_host_edges": (0.5, 0.5), "cross_subnet_edges": (0.2, 0.3),
+            "new_dst_ports": (0.5, 0.5), "connection_repetition": (1, 0.5),
         },
         "PortScan": {
             "flow_duration_ms": (8, 5), "total_fwd_packets": (2, 1),
@@ -176,6 +200,11 @@ def _generate_flow_vector(label: str, rng: np.random.Generator) -> np.ndarray:
             "tcp_window_mean": (1024, 200), "tcp_window_std": (50, 30),
             "ip_fragment_flag_count": (0, 0.1), "payload_size_mean": (0, 2),
             "payload_size_std": (0, 1), "retransmission_count": (0.2, 0.3),
+            # Topology — PortScan: very high fanout, many new ports
+            "src_fanout": (120, 40), "dst_fanin": (1, 0.5),
+            "unique_dst_hosts": (80, 30), "unique_src_hosts": (1, 0.5),
+            "new_host_edges": (60, 20), "cross_subnet_edges": (15, 8),
+            "new_dst_ports": (150, 50), "connection_repetition": (1, 0.5),
         },
         "BruteForce": {
             "flow_duration_ms": (300, 100), "total_fwd_packets": (9, 3),
@@ -197,6 +226,11 @@ def _generate_flow_vector(label: str, rng: np.random.Generator) -> np.ndarray:
             "tcp_window_mean": (32768, 4000), "tcp_window_std": (500, 200),
             "ip_fragment_flag_count": (0, 0.1), "payload_size_mean": (72, 15),
             "payload_size_std": (8, 4), "retransmission_count": (1, 0.8),
+            # Topology — BruteForce: single target, high repetition
+            "src_fanout": (1, 0.5), "dst_fanin": (1, 0.5),
+            "unique_dst_hosts": (1, 0.5), "unique_src_hosts": (1, 0.5),
+            "new_host_edges": (0.2, 0.3), "cross_subnet_edges": (0.5, 0.5),
+            "new_dst_ports": (0.5, 0.5), "connection_repetition": (25, 10),
         },
         "WebAttack": {
             "flow_duration_ms": (220, 90), "total_fwd_packets": (6, 2),
@@ -218,6 +252,11 @@ def _generate_flow_vector(label: str, rng: np.random.Generator) -> np.ndarray:
             "tcp_window_mean": (65535, 5000), "tcp_window_std": (2000, 800),
             "ip_fragment_flag_count": (0, 0.1), "payload_size_mean": (310, 100),
             "payload_size_std": (120, 50), "retransmission_count": (0.3, 0.4),
+            # Topology — WebAttack: single target, moderate repetition
+            "src_fanout": (1, 0.5), "dst_fanin": (2, 1),
+            "unique_dst_hosts": (1, 0.5), "unique_src_hosts": (1, 0.5),
+            "new_host_edges": (0.3, 0.3), "cross_subnet_edges": (0.3, 0.3),
+            "new_dst_ports": (1, 0.5), "connection_repetition": (8, 3),
         },
         "LateralMovement": {
             "flow_duration_ms": (500, 200), "total_fwd_packets": (8, 3),
@@ -239,6 +278,11 @@ def _generate_flow_vector(label: str, rng: np.random.Generator) -> np.ndarray:
             "tcp_window_mean": (32768, 4000), "tcp_window_std": (800, 300),
             "ip_fragment_flag_count": (0, 0.1), "payload_size_mean": (110, 35),
             "payload_size_std": (25, 10), "retransmission_count": (0.8, 0.6),
+            # Topology — LateralMovement: high cross-subnet, many new edges
+            "src_fanout": (8, 3), "dst_fanin": (3, 1.5),
+            "unique_dst_hosts": (6, 2), "unique_src_hosts": (3, 1.5),
+            "new_host_edges": (5, 2), "cross_subnet_edges": (4, 2),
+            "new_dst_ports": (3, 1.5), "connection_repetition": (3, 1.5),
         },
         "Botnet": {
             "flow_duration_ms": (5000, 2000), "total_fwd_packets": (4, 2),
@@ -260,6 +304,11 @@ def _generate_flow_vector(label: str, rng: np.random.Generator) -> np.ndarray:
             "tcp_window_mean": (8192, 2000), "tcp_window_std": (200, 100),
             "ip_fragment_flag_count": (0, 0.1), "payload_size_mean": (78, 20),
             "payload_size_std": (10, 5), "retransmission_count": (0.2, 0.3),
+            # Topology — Botnet: low fanout, periodic beaconing to C2
+            "src_fanout": (1, 0.5), "dst_fanin": (1, 0.5),
+            "unique_dst_hosts": (2, 1), "unique_src_hosts": (1, 0.5),
+            "new_host_edges": (0.3, 0.3), "cross_subnet_edges": (1, 0.5),
+            "new_dst_ports": (0.5, 0.5), "connection_repetition": (15, 5),
         },
         "Exfiltration": {
             "flow_duration_ms": (3000, 1500), "total_fwd_packets": (20, 8),
@@ -281,6 +330,11 @@ def _generate_flow_vector(label: str, rng: np.random.Generator) -> np.ndarray:
             "tcp_window_mean": (65535, 5000), "tcp_window_std": (3000, 1000),
             "ip_fragment_flag_count": (0.5, 0.5), "payload_size_mean": (750, 200),
             "payload_size_std": (150, 60), "retransmission_count": (0.5, 0.5),
+            # Topology — Exfiltration: single external target, high data volume
+            "src_fanout": (1, 0.5), "dst_fanin": (1, 0.5),
+            "unique_dst_hosts": (1, 0.5), "unique_src_hosts": (1, 0.5),
+            "new_host_edges": (0.5, 0.5), "cross_subnet_edges": (1, 0.7),
+            "new_dst_ports": (0.3, 0.3), "connection_repetition": (10, 4),
         },
         "DDoS": {
             "flow_duration_ms": (40, 25), "total_fwd_packets": (600, 150),
@@ -302,6 +356,11 @@ def _generate_flow_vector(label: str, rng: np.random.Generator) -> np.ndarray:
             "tcp_window_mean": (512, 200), "tcp_window_std": (50, 30),
             "ip_fragment_flag_count": (0.1, 0.2), "payload_size_mean": (0, 2),
             "payload_size_std": (0, 1), "retransmission_count": (5, 3),
+            # Topology — DDoS: many sources, single target, high repetition
+            "src_fanout": (1, 0.5), "dst_fanin": (50, 20),
+            "unique_dst_hosts": (1, 0.5), "unique_src_hosts": (40, 15),
+            "new_host_edges": (30, 10), "cross_subnet_edges": (20, 8),
+            "new_dst_ports": (0.5, 0.5), "connection_repetition": (80, 30),
         },
     }
 
@@ -405,6 +464,45 @@ def generate_temporal_dataset(
     return X, y_labels, y_infiltration
 
 
+def generate_temporal_dataset_with_horizons(
+    n_sequences: int = 500,
+    seq_len: int = 15,
+    seed: int = 42,
+    noise: float = 0.15,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, np.ndarray]]:
+    """Generate synthetic temporal sequences along with explicit multi-horizon targets.
+
+    Horizon offsets (in 30s steps):
+      - h30:  +1 step  (+30s)
+      - h60:  +2 steps (+60s)
+      - h120: +4 steps (+120s)
+      - h300: +10 steps (+300s)
+
+    Returns
+    -------
+    X : ndarray of shape (n_sequences, seq_len, n_features)
+    y_labels : ndarray of shape (n_sequences, seq_len)
+    y_infiltration : ndarray of shape (n_sequences, seq_len)
+    horizon_labels : dict[str, ndarray]
+        Mapping horizon name -> array of shape (n_sequences, seq_len) with future stage index,
+        or -1 where future is beyond sequence boundary.
+    """
+    X, y_labels, y_infiltration = generate_temporal_dataset(
+        n_sequences=n_sequences, seq_len=seq_len, seed=seed, noise=noise
+    )
+
+    horizon_offsets = {"h30": 1, "h60": 2, "h120": 4, "h300": 10}
+    horizon_labels: dict[str, np.ndarray] = {}
+
+    for h_name, offset in horizon_offsets.items():
+        h_arr = np.full((n_sequences, seq_len), -1, dtype=np.int64)
+        if offset < seq_len:
+            h_arr[:, : seq_len - offset] = y_labels[:, offset:]
+        horizon_labels[h_name] = h_arr
+
+    return X, y_labels, y_infiltration, horizon_labels
+
+
 def extract_features_from_pcap(pcap_path: str, window_size: int = 10) -> np.ndarray:
     """Extract world model features from a PCAP file.
 
@@ -490,6 +588,33 @@ def extract_features_from_pcap(pcap_path: str, window_size: int = 10) -> np.ndar
         n_pkts = len(w_pkts)
         avg_size = total_bytes / n_pkts if n_pkts else 0
 
+        # Topology features from packet src/dst IP pairs
+        src_ips = set()
+        dst_ips = set()
+        host_edges = set()
+        for pkt in w_pkts:
+            if IP in pkt:
+                src_ip = pkt[IP].src
+                dst_ip = pkt[IP].dst
+                src_ips.add(src_ip)
+                dst_ips.add(dst_ip)
+                host_edges.add((src_ip, dst_ip))
+
+        # Cross-subnet: different /24 prefix
+        cross_subnet = 0
+        for s, d in host_edges:
+            s_prefix = ".".join(s.split(".")[:3])
+            d_prefix = ".".join(d.split(".")[:3])
+            if s_prefix != d_prefix:
+                cross_subnet += 1
+
+        # Connection repetition: how many packets go to same dst
+        dst_counter: dict[str, int] = {}
+        for pkt in w_pkts:
+            if IP in pkt:
+                dst_counter[pkt[IP].dst] = dst_counter.get(pkt[IP].dst, 0) + 1
+        max_repetition = max(dst_counter.values()) if dst_counter else 0
+
         # Fill feature vector
         vec = [
             w_dur_ms,                                          # flow_duration_ms
@@ -526,6 +651,15 @@ def extract_features_from_pcap(pcap_path: str, window_size: int = 10) -> np.ndar
             np.mean(payload_sizes) if payload_sizes else 0,    # payload_size_mean
             np.std(payload_sizes) if len(payload_sizes) > 1 else 0, # payload_size_std
             retrans,                                           # retransmission_count
+            # Topology features
+            len(dst_ips),                                      # src_fanout (unique dsts per src)
+            len(src_ips),                                      # dst_fanin (unique srcs per dst)
+            len(dst_ips),                                      # unique_dst_hosts
+            len(src_ips),                                      # unique_src_hosts
+            len(host_edges),                                   # new_host_edges
+            cross_subnet,                                      # cross_subnet_edges
+            len(dst_ports),                                    # new_dst_ports
+            max_repetition,                                    # connection_repetition
         ]
         features[w] = np.array(vec, dtype=np.float32)
 

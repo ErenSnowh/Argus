@@ -64,6 +64,7 @@ class InfiltrationForecast:
     max_infiltration_prob: float            # Peak probability across timeline
     forecast_explanation: str               # Natural-language summary
     attention_weights: list[list[float]] | None = None  # Raw attention weights
+    horizon_forecasts: dict[str, float] | None = None   # Multi-horizon anchor predictions (e.g. {'h30': 0.85, ...})
 
 
 def _check_torch():
@@ -181,6 +182,17 @@ if TORCH_AVAILABLE:
                 nn.Linear(d_model // 2, 1),
             )
 
+            # Multi-horizon anchor heads (P1-A): direct predictions for
+            # specific future horizons to constrain autoregressive drift.
+            # Each head outputs (n_stages + 1): stage logits + infiltration prob.
+            self.horizon_heads = nn.ModuleDict({
+                "h30":  nn.Linear(d_model, n_stages + 1),
+                "h60":  nn.Linear(d_model, n_stages + 1),
+                "h120": nn.Linear(d_model, n_stages + 1),
+                "h300": nn.Linear(d_model, n_stages + 1),
+            })
+            self.horizon_names = ["h30", "h60", "h120", "h300"]
+
             # Attention hook storage
             self._attention_weights: list[torch.Tensor] = []
             self._register_attention_hooks()
@@ -234,6 +246,12 @@ if TORCH_AVAILABLE:
                 "infiltration_logits": self.infiltration_head(hidden),
             }
 
+            # Multi-horizon anchor predictions
+            horizon_preds = {}
+            for name in self.horizon_names:
+                horizon_preds[name] = self.horizon_heads[name](hidden)
+            result["horizon_predictions"] = horizon_preds
+
             if return_attention:
                 result["attention_weights"] = self._attention_weights
 
@@ -251,16 +269,34 @@ if TORCH_AVAILABLE:
     # -----------------------------------------------------------------------
 
     class WorldModelLoss(nn.Module):
-        """Combined loss for all three prediction heads.
+        """Combined loss for all prediction heads.
 
-        Loss = α·MSE(state) + β·CE(stage) + γ·BCE(infiltration)
+        Loss = α·MSE(state) + β·CE(stage) + γ·BCE(infiltration) + δ·horizon_losses
+
+        Primary heads (α+β+γ = 0.80):
+            state_head:        Next-state feature regression
+            stage_head:        MITRE ATT&CK stage classification
+            infiltration_head: Binary infiltration probability
+
+        Horizon anchors (δ = 0.20, split equally across 4 heads):
+            h30/h60/h120/h300: Direct predictions at T+1/T+2/T+4/T+10 steps
         """
 
-        def __init__(self, alpha: float = 0.3, beta: float = 0.4, gamma: float = 0.3):
+        # Step offsets for each horizon head (in sequence positions)
+        HORIZON_OFFSETS = {"h30": 1, "h60": 2, "h120": 4, "h300": 10}
+
+        def __init__(
+            self,
+            alpha: float = 0.25,
+            beta: float = 0.30,
+            gamma: float = 0.25,
+            delta: float = 0.20,
+        ):
             super().__init__()
             self.alpha = alpha
             self.beta = beta
             self.gamma = gamma
+            self.delta = delta
             self.mse = nn.MSELoss()
             self.ce = nn.CrossEntropyLoss()
             self.bce = nn.BCEWithLogitsLoss()
@@ -272,8 +308,7 @@ if TORCH_AVAILABLE:
             target_stage: torch.Tensor,
             target_infiltration: torch.Tensor,
         ) -> dict[str, torch.Tensor]:
-            # State prediction loss (MSE)
-            # We predict the next state, so shift targets by 1
+            # State prediction loss (MSE) — shifted by 1
             pred_state = outputs["predicted_state"][:, :-1]
             true_state = target_state[:, 1:]
             loss_state = self.mse(pred_state, true_state)
@@ -287,10 +322,39 @@ if TORCH_AVAILABLE:
             inf_logits = outputs["infiltration_logits"].squeeze(-1)
             loss_infiltration = self.bce(inf_logits, target_infiltration)
 
+            # Multi-horizon anchor losses
+            horizon_loss = torch.tensor(0.0, device=loss_state.device)
+            n_horizon = 0
+            horizon_preds = outputs.get("horizon_predictions", {})
+            seq_len = target_stage.size(1)
+
+            for h_name, offset in self.HORIZON_OFFSETS.items():
+                if h_name not in horizon_preds or offset >= seq_len:
+                    continue
+                h_out = horizon_preds[h_name]  # (batch, seq_len, n_stages+1)
+                n_stages = h_out.size(-1) - 1
+                # Use target stage shifted forward by offset
+                valid_len = seq_len - offset
+                h_stage_logits = h_out[:, :valid_len, :n_stages]
+                h_stage_targets = target_stage[:, offset:offset + valid_len]
+                h_inf_logits = h_out[:, :valid_len, -1]
+                h_inf_targets = target_infiltration[:, offset:offset + valid_len]
+
+                h_stage_logits_flat = h_stage_logits.reshape(-1, n_stages)
+                h_stage_targets_flat = h_stage_targets.reshape(-1)
+                h_loss = self.ce(h_stage_logits_flat, h_stage_targets_flat) + \
+                         self.bce(h_inf_logits, h_inf_targets)
+                horizon_loss = horizon_loss + h_loss
+                n_horizon += 1
+
+            if n_horizon > 0:
+                horizon_loss = horizon_loss / n_horizon
+
             total = (
                 self.alpha * loss_state
                 + self.beta * loss_stage
                 + self.gamma * loss_infiltration
+                + self.delta * horizon_loss
             )
 
             return {
@@ -298,6 +362,7 @@ if TORCH_AVAILABLE:
                 "state_loss": loss_state,
                 "stage_loss": loss_stage,
                 "infiltration_loss": loss_infiltration,
+                "horizon_loss": horizon_loss,
             }
 
 else:

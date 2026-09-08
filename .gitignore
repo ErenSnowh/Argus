@@ -16,3 +16,14 @@ argus/data/knowledge_cache/*.json
 .DS_Store
 .vscode/
 .idea/
+.claude/
+
+# Datasets
+CIC-datasets/
+*.pcap.gz
+
+# Local / guidance / UI mockups
+docs/UI/
+docs/sih26153-ui-specification.md
+docs/ui-instruction.md
+*_legacy.*

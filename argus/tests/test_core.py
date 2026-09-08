@@ -478,4 +478,183 @@ def test_dashboard_datasets_sample_endpoint(api_client):
     data = resp.json()
     assert data["source"] == "unsw_nb15"
     assert len(data["rows"]) == 5
-    assert data["feature_count"] == 38
+    assert data["feature_count"] == 46
+
+
+# ---------------------------------------------------------------------------
+# P0 / P1 Strategic Improvement Tests (SIH 26153)
+# ---------------------------------------------------------------------------
+
+def test_topology_features_in_schema():
+    """Verify 8 topology-derived features exist in WORLD_MODEL_FEATURES and NUM_FEATURES is 46."""
+    from ml.world_model.features import NUM_FEATURES, TOPOLOGY_FEATURE_COLUMNS, WORLD_MODEL_FEATURES
+
+    assert len(TOPOLOGY_FEATURE_COLUMNS) == 8
+    assert NUM_FEATURES == 46
+    for col in TOPOLOGY_FEATURE_COLUMNS:
+        assert col in WORLD_MODEL_FEATURES
+
+
+def test_topology_profiles_in_synthetic_data():
+    """Verify synthetic data generates non-zero topology features."""
+    import numpy as np
+    from ml.world_model.features import _generate_flow_vector, TOPOLOGY_FEATURE_COLUMNS, WORLD_MODEL_FEATURES
+
+    rng = np.random.default_rng(42)
+    vec = _generate_flow_vector("PortScan", rng)
+    col_idx = {name: i for i, name in enumerate(WORLD_MODEL_FEATURES)}
+    assert vec[col_idx["src_fanout"]] > 10
+    assert vec[col_idx["new_dst_ports"]] > 10
+
+
+def test_multi_horizon_heads_exist():
+    """Verify WorldModelTransformer has 4 auxiliary horizon heads."""
+    from ml.world_model.model import TORCH_AVAILABLE, WorldModelTransformer
+    if not TORCH_AVAILABLE:
+        import pytest
+        pytest.skip("PyTorch not installed")
+    model = WorldModelTransformer(n_features=46)
+    assert hasattr(model, "horizon_heads")
+    assert set(model.horizon_heads.keys()) == {"h30", "h60", "h120", "h300"}
+
+
+def test_multi_horizon_forward_pass():
+    """Verify forward pass returns horizon_predictions with valid shapes."""
+    from ml.world_model.model import TORCH_AVAILABLE, WorldModelTransformer
+    if not TORCH_AVAILABLE:
+        import pytest
+        pytest.skip("PyTorch not installed")
+    import torch
+    from ml.world_model.features import NUM_ATTACK_STAGES
+    model = WorldModelTransformer(n_features=46)
+    x = torch.randn(2, 10, 46)
+    out = model(x)
+    assert "horizon_predictions" in out
+    for h_name in ["h30", "h60", "h120", "h300"]:
+        assert h_name in out["horizon_predictions"]
+        tensor = out["horizon_predictions"][h_name]
+        assert tensor.shape == (2, 10, NUM_ATTACK_STAGES + 1)
+
+
+def test_multi_horizon_loss():
+    """Verify WorldModelLoss computes horizon loss components without error."""
+    from ml.world_model.model import TORCH_AVAILABLE, WorldModelLoss, WorldModelTransformer
+    if not TORCH_AVAILABLE:
+        import pytest
+        pytest.skip("PyTorch not installed")
+    import torch
+    model = WorldModelTransformer(n_features=46)
+    criterion = WorldModelLoss()
+    x = torch.randn(2, 12, 46)
+    yl = torch.randint(0, 8, (2, 12))
+    yi = torch.zeros(2, 12)
+    out = model(x)
+    losses = criterion(out, x, yl, yi)
+    assert "total" in losses
+    assert "horizon_loss" in losses
+    assert losses["total"] > 0
+
+
+def test_counterfactual_simulator_basic():
+    """Verify CounterfactualSimulator runs baseline and mitigations."""
+    import numpy as np
+    from ml.world_model.counterfactual import CounterfactualSimulator, MitigationAction
+
+    sim = CounterfactualSimulator()
+    feat = np.ones(46, dtype=np.float32)
+    res = sim.simulate(feat, k_steps=5)
+    assert "baseline" in res
+    assert "mitigations" in res
+    assert "risk_deltas" in res
+    assert "recommended_action" in res
+    assert MitigationAction.BLOCK_SRC.value in res["mitigations"]
+
+
+def test_counterfactual_risk_delta():
+    """Verify BLOCK_SRC action produces a valid risk delta."""
+    import numpy as np
+    from ml.world_model.counterfactual import CounterfactualSimulator, MitigationAction
+    from ml.world_model.features import _generate_flow_vector
+
+    rng = np.random.default_rng(42)
+    feat = _generate_flow_vector("PortScan", rng)
+    sim = CounterfactualSimulator()
+    res = sim.simulate(feat, k_steps=5, actions=[MitigationAction.BLOCK_SRC.value])
+    assert MitigationAction.BLOCK_SRC.value in res["risk_deltas"]
+    assert isinstance(res["risk_deltas"][MitigationAction.BLOCK_SRC.value], float)
+
+
+def test_counterfactual_api_endpoint(api_client):
+    """Verify /api/forecast/counterfactual returns 200 with mitigation recommendations."""
+    resp = api_client.post("/api/forecast/counterfactual", json={"k_steps": 3})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "baseline" in data
+    assert "mitigations" in data
+    assert "recommended_action" in data
+
+
+def test_benchmark_includes_rf_baseline():
+    """Verify benchmark harness trains and reports Random Forest baseline."""
+    from ml.world_model.benchmark import run_benchmark
+    res = run_benchmark(data_source="synthetic", n_sequences=15, seq_len=5)
+    assert "random_forest" in res
+    assert "logistic_regression" in res
+    assert "world_model" in res
+    assert "accuracy" in res["random_forest"]
+
+
+def test_benchmark_lead_time_metric():
+    """Verify compute_forecast_lead_time correctly computes early warning."""
+    import numpy as np
+    from ml.world_model.benchmark import compute_forecast_lead_time
+
+    # True attack starts at step 4 (120s)
+    y_true = np.array([[0, 0, 0, 0, 1, 1, 1, 1, 1, 1]])
+    # Predicted attack at step 2 (60s early warning)
+    y_pred = np.array([[0, 0, 1, 1, 1, 1, 1, 1, 1, 1]])
+    res = compute_forecast_lead_time(y_true, y_pred, step_duration_sec=30.0)
+    assert res["mean_lead_time_sec"] == 60.0
+    assert res["early_warning_rate"] == 1.0
+
+
+def test_benchmark_pr_auc():
+    """Verify PR-AUC is computed in benchmark evaluation."""
+    from ml.world_model.benchmark import run_benchmark
+    res = run_benchmark(data_source="synthetic", n_sequences=20, seq_len=5)
+    assert "pr_auc" in res["logistic_regression"]
+    assert "pr_auc" in res["random_forest"]
+
+
+def test_supervision_validation():
+    """Verify --validate-supervision runs multi-task verification and passes."""
+    from ml.world_model.train import train_world_model
+    from ml.world_model.model import TORCH_AVAILABLE
+    if not TORCH_AVAILABLE:
+        return
+    res = train_world_model(
+        data_source="synthetic",
+        n_sequences=25,
+        seq_len=8,
+        epochs=5,
+        batch_size=8,
+        validate_supervision=True,
+    )
+    assert res["supervision_validated"] is True
+    assert "state_loss" in res["history"]
+
+
+def test_temporal_split_no_leakage():
+    """Verify train_test_split_temporal ensures zero leakage."""
+    import numpy as np
+    from ml.world_model.dataset_loader import get_temporal_split_info, train_test_split_temporal
+
+    X = np.arange(100).reshape(10, 5, 2).astype(np.float32)
+    yl = np.zeros((10, 5), dtype=np.int64)
+    yi = np.zeros((10, 5), dtype=np.float32)
+
+    train, test = train_test_split_temporal(X, yl, yi, test_ratio=0.3)
+    info = get_temporal_split_info(train, test)
+    assert info["leakage_detected"] is False
+    assert info["train_sequences"] == 7
+    assert info["test_sequences"] == 3

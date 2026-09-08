@@ -27,6 +27,7 @@ import pandas as pd
 from ml.world_model.features import (
     ATTACK_LABELS,
     ATTACK_STAGE_INDEX,
+    ATTACK_STAGE_NAMES,
     NUM_FEATURES,
     WORLD_MODEL_FEATURES,
     generate_temporal_dataset,
@@ -35,10 +36,48 @@ from ml.world_model.features import (
 
 # ---------------------------------------------------------------------------
 # Column name mapping: CIC-IDS-2018 → ARGUS schema
+# The actual CSE-CIC-IDS-2018 CSV headers use abbreviated column names.
+# Both the old (CICFlowMeter v3) and new (v4) naming variants are included
+# to handle both formats transparently.
 # ---------------------------------------------------------------------------
 
 _CICIDS_COLUMN_MAP = {
+    # --- New CSE-CIC-2018 format (abbreviated names) ---
     "Flow Duration": "flow_duration_ms",
+    "Tot Fwd Pkts": "total_fwd_packets",
+    "Tot Bwd Pkts": "total_bwd_packets",
+    "TotLen Fwd Pkts": "total_fwd_bytes",
+    "TotLen Bwd Pkts": "total_bwd_bytes",
+    "Fwd Pkt Len Mean": "fwd_packet_len_mean",
+    "Fwd Pkt Len Std": "fwd_packet_len_std",
+    "Bwd Pkt Len Mean": "bwd_packet_len_mean",
+    "Bwd Pkt Len Std": "bwd_packet_len_std",
+    "Flow Byts/s": "flow_bytes_per_sec",
+    "Flow Pkts/s": "flow_packets_per_sec",
+    "Flow IAT Mean": "flow_iat_mean",
+    "Flow IAT Std": "flow_iat_std",
+    "Fwd IAT Mean": "fwd_iat_mean",
+    "Bwd IAT Mean": "bwd_iat_mean",
+    "SYN Flag Cnt": "syn_flag_count",
+    "ACK Flag Cnt": "ack_flag_count",
+    "RST Flag Cnt": "rst_flag_count",
+    "PSH Flag Cnt": "psh_flag_count",
+    "FIN Flag Cnt": "fin_flag_count",
+    "URG Flag Cnt": "urg_flag_count",
+    "Fwd Header Len": "fwd_header_len",
+    "Bwd Header Len": "bwd_header_len",
+    "Down/Up Ratio": "down_up_ratio",
+    "Pkt Size Avg": "avg_packet_size",
+    "Fwd IAT Std": "fwd_iat_std",
+    "Bwd IAT Std": "bwd_iat_std",
+    "Flow IAT Max": "flow_iat_max",
+    "Fwd Seg Size Avg": "fwd_packet_len_mean",  # alias
+    "Bwd Seg Size Avg": "bwd_packet_len_mean",  # alias
+    "Init Fwd Win Byts": "tcp_window_mean",     # initial TCP window
+    "Init Bwd Win Byts": "tcp_window_std",      # secondary TCP window stat
+    "Timestamp": "timestamp",
+    "Label": "label",
+    # --- Old CICFlowMeter v3 format (longer names) ---
     "Total Fwd Packet": "total_fwd_packets",
     "Total Bwd packets": "total_bwd_packets",
     "Total Length of Fwd Packet": "total_fwd_bytes",
@@ -49,24 +88,13 @@ _CICIDS_COLUMN_MAP = {
     "Bwd Packet Length Std": "bwd_packet_len_std",
     "Flow Bytes/s": "flow_bytes_per_sec",
     "Flow Packets/s": "flow_packets_per_sec",
-    "Flow IAT Mean": "flow_iat_mean",
-    "Flow IAT Std": "flow_iat_std",
-    "Fwd IAT Mean": "fwd_iat_mean",
-    "Bwd IAT Mean": "bwd_iat_mean",
     "SYN Flag Count": "syn_flag_count",
     "ACK Flag Count": "ack_flag_count",
     "RST Flag Count": "rst_flag_count",
     "PSH Flag Count": "psh_flag_count",
     "FIN Flag Count": "fin_flag_count",
-    "Fwd Header Length": "fwd_header_len",
-    "Bwd Header Length": "bwd_header_len",
-    "Down/Up Ratio": "down_up_ratio",
-    "Average Packet Size": "avg_packet_size",
-    "Fwd IAT Std": "fwd_iat_std",
-    "Bwd IAT Std": "bwd_iat_std",
-    "Flow IAT Max": "flow_iat_max",
     "URG Flag Count": "urg_flag_count",
-    "Label": "label",
+    "Average Packet Size": "avg_packet_size",
 }
 
 # CIC-IDS-2018 attack label → our label mapping
@@ -108,56 +136,67 @@ def load_cicids2018(csv_dir: str, max_rows: int | None = None) -> pd.DataFrame:
     if not csv_path.exists():
         raise FileNotFoundError(f"Dataset directory not found: {csv_dir}")
 
-    csv_files = list(csv_path.glob("*.csv"))
+    if csv_path.is_file():
+        csv_files = [csv_path]
+    else:
+        csv_files = sorted(csv_path.glob("*.csv"))
+
     if not csv_files:
         raise FileNotFoundError(f"No CSV files found in {csv_dir}")
 
     dfs = []
-    rows_loaded = 0
-    for csv_file in sorted(csv_files):
-        nrows = None
-        if max_rows is not None:
-            remaining = max_rows - rows_loaded
-            if remaining <= 0:
-                break
-            nrows = remaining
-
-        try:
-            df = pd.read_csv(csv_file, nrows=nrows, low_memory=False)
-            df.columns = df.columns.str.strip()
-            dfs.append(df)
-            rows_loaded += len(df)
-        except Exception as e:
-            print(f"Warning: could not load {csv_file.name}: {e}")
-            continue
+    if len(csv_files) == 1:
+        nrows = max_rows
+        df = pd.read_csv(csv_files[0], nrows=nrows, low_memory=False)
+        df.columns = df.columns.str.strip()
+        dfs.append(df)
+    else:
+        effective_max = max_rows if max_rows is not None else 25000
+        per_file = max(20, effective_max // len(csv_files))
+        for csv_file in csv_files:
+            try:
+                df = pd.read_csv(csv_file, nrows=per_file, low_memory=False)
+                df.columns = df.columns.str.strip()
+                dfs.append(df)
+            except Exception as e:
+                print(f"Warning: could not load {csv_file.name}: {e}")
+                continue
 
     if not dfs:
         raise ValueError("No data loaded from CSV files")
 
     combined = pd.concat(dfs, ignore_index=True)
 
-    # Rename columns
+    # Rename columns and remove duplicate column names created by aliases
     combined = combined.rename(columns=_CICIDS_COLUMN_MAP)
+    combined = combined.loc[:, ~combined.columns.duplicated(keep="first")]
 
-    # Map labels
+    # Filter out repeated header rows if present
     if "label" in combined.columns:
-        combined["label"] = combined["label"].str.strip().map(
+        combined = combined[combined["label"].astype(str).str.strip() != "Label"]
+        combined["label"] = combined["label"].astype(str).str.strip().map(
             lambda x: _CICIDS_LABEL_MAP.get(x, "BENIGN")
         )
 
-    # Fill missing features with defaults
+    # Clean: convert to numeric, replace inf/nan with 0, and clip bounds
     for col in WORLD_MODEL_FEATURES:
         if col not in combined.columns:
             combined[col] = 0.0
+        else:
+            combined[col] = (
+                pd.to_numeric(combined[col], errors="coerce")
+                .replace([np.inf, -np.inf], np.nan)
+                .fillna(0.0)
+                .clip(lower=0.0, upper=1e9)
+                .astype(np.float32)
+            )
 
-    # Clean: replace inf/nan with 0
-    combined = combined.replace([np.inf, -np.inf], np.nan).fillna(0)
+    extra_cols = [c for c in ["label", "timestamp"] if c in combined.columns]
+    if "label" not in extra_cols:
+        combined["label"] = "BENIGN"
+        extra_cols.append("label")
 
-    # Clip negative values
-    for col in WORLD_MODEL_FEATURES:
-        combined[col] = combined[col].clip(lower=0)
-
-    return combined[WORLD_MODEL_FEATURES + ["label"]]
+    return combined[WORLD_MODEL_FEATURES + extra_cols]
 
 
 def load_ctu13(binetflow_path: str, max_rows: int | None = None) -> pd.DataFrame:
@@ -309,6 +348,107 @@ def train_test_split_temporal(
     test = (X[split_idx:], y_labels[split_idx:], y_infiltration[split_idx:])
 
     return train, test
+
+
+def train_test_split_by_day(
+    df: pd.DataFrame,
+    train_days: list[str] | None = None,
+    test_days: list[str] | None = None,
+    timestamp_col: str = "timestamp",
+    window_size: int = 10,
+    stride: int = 1,
+) -> tuple[
+    tuple[np.ndarray, np.ndarray, np.ndarray],
+    tuple[np.ndarray, np.ndarray, np.ndarray],
+]:
+    """Chronological split by calendar day to evaluate out-of-distribution generalization.
+
+    Ensures zero temporal leakage between training and testing days.
+    Sequences are generated independently within each split so that sequence
+    windows never cross day boundaries.
+
+    Parameters
+    ----------
+    df : DataFrame
+        DataFrame containing WORLD_MODEL_FEATURES, 'label', and optionally timestamp_col.
+    train_days : list of str, optional
+        Date strings (e.g. ['2018-02-14', '2018-02-15']) for training.
+    test_days : list of str, optional
+        Date strings for testing.
+    timestamp_col : str
+        Column name for timestamp.
+    window_size : int
+        Sequence length.
+    stride : int
+        Window stride.
+    """
+    if timestamp_col not in df.columns:
+        # Fallback to temporal split on generated sequences
+        X, y_labels, y_inf = generate_state_sequences(df, window_size=window_size, stride=stride)
+        return train_test_split_temporal(X, y_labels, y_inf, test_ratio=0.2)
+
+    df_copy = df.copy()
+    ts = pd.to_datetime(df_copy[timestamp_col], errors="coerce")
+    df_copy["_day"] = ts.dt.strftime("%Y-%m-%d")
+
+    unique_days = sorted([d for d in df_copy["_day"].dropna().unique()])
+    if len(unique_days) >= 2:
+        if train_days is None and test_days is None:
+            n_train = max(1, int(len(unique_days) * 0.75))
+            train_days = unique_days[:n_train]
+            test_days = unique_days[n_train:]
+        elif train_days is None and test_days is not None:
+            train_days = [d for d in unique_days if d not in test_days]
+        elif test_days is None and train_days is not None:
+            test_days = [d for d in unique_days if d not in train_days]
+    else:
+        # Not enough distinct days, fall back to chronological split
+        X, y_labels, y_inf = generate_state_sequences(df, window_size=window_size, stride=stride)
+        return train_test_split_temporal(X, y_labels, y_inf, test_ratio=0.2)
+
+    df_train = df_copy[df_copy["_day"].isin(train_days)]
+    df_test = df_copy[df_copy["_day"].isin(test_days)]
+
+    train_data = generate_state_sequences(df_train, window_size=window_size, stride=stride)
+    test_data = generate_state_sequences(df_test, window_size=window_size, stride=stride)
+
+    return train_data, test_data
+
+
+def get_temporal_split_info(
+    train: tuple[np.ndarray, np.ndarray, np.ndarray],
+    test: tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> dict:
+    """Return diagnostic metadata about temporal splits."""
+    X_tr, y_tr, yi_tr = train
+    X_te, y_te, yi_te = test
+
+    train_stages = sorted(list(set(int(s) for s in y_tr.flatten()))) if len(y_tr) > 0 else []
+    test_stages = sorted(list(set(int(s) for s in y_te.flatten()))) if len(y_te) > 0 else []
+    unseen_stages = sorted(list(set(test_stages) - set(train_stages)))
+
+    # Leakage check: verify no exact match between first steps of test and train sequences
+    leakage = False
+    if len(X_tr) > 0 and len(X_te) > 0:
+        tr_sample = X_tr[:min(100, len(X_tr)), 0]
+        te_sample = X_te[:min(100, len(X_te)), 0]
+        for te_row in te_sample:
+            if np.any(np.all(np.isclose(tr_sample, te_row, atol=1e-5), axis=-1)):
+                leakage = True
+                break
+
+    return {
+        "train_sequences": int(len(X_tr)),
+        "test_sequences": int(len(X_te)),
+        "seq_len": int(X_tr.shape[1]) if len(X_tr) > 0 else 0,
+        "n_features": int(X_tr.shape[2]) if len(X_tr) > 0 else 0,
+        "train_stages": [ATTACK_STAGE_NAMES.get(s, str(s)) for s in train_stages],
+        "test_stages": [ATTACK_STAGE_NAMES.get(s, str(s)) for s in test_stages],
+        "unseen_test_stages": [ATTACK_STAGE_NAMES.get(s, str(s)) for s in unseen_stages],
+        "train_infiltration_ratio": round(float(np.mean(yi_tr)), 4) if len(yi_tr) > 0 else 0.0,
+        "test_infiltration_ratio": round(float(np.mean(yi_te)), 4) if len(yi_te) > 0 else 0.0,
+        "leakage_detected": leakage,
+    }
 
 
 SAMPLE_DATASETS_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "sample_datasets"

@@ -251,8 +251,17 @@ class InfiltrationPredictor:
             self._model.load_state_dict(checkpoint["model_state_dict"])
             self._model.eval()
 
-            self._train_mean = np.array(checkpoint.get("train_mean", np.zeros(n_features)))
-            self._train_std = np.array(checkpoint.get("train_std", np.ones(n_features)))
+            train_mean = checkpoint.get("train_mean")
+            if train_mean is not None:
+                self._train_mean = np.array(train_mean, dtype=np.float32)
+            else:
+                self._train_mean = np.zeros(n_features, dtype=np.float32)
+
+            train_std = checkpoint.get("train_std")
+            if train_std is not None:
+                self._train_std = np.array(train_std, dtype=np.float32)
+            else:
+                self._train_std = np.ones(n_features, dtype=np.float32)
             self._train_std[self._train_std < 1e-8] = 1.0
             return True
         except Exception:
@@ -304,6 +313,20 @@ class InfiltrationPredictor:
         else:
             # Use current features as a minimal context (repeat to form sequence)
             context = np.tile(current_features, (3, 1))  # 3-step context
+
+        # Ensure context matches model feature dimension
+        model_n_feat = getattr(self._model, "n_features", len(self._train_mean) if self._train_mean is not None else NUM_FEATURES)
+        if context.shape[-1] != model_n_feat:
+            if context.shape[-1] > model_n_feat:
+                context = context[:, :model_n_feat]
+            else:
+                pad = np.zeros((context.shape[0], model_n_feat - context.shape[-1]), dtype=np.float32)
+                context = np.concatenate([context, pad], axis=-1)
+
+        # Defensive fallback for normalization stats
+        if self._train_mean is None or self._train_std is None or len(self._train_mean) != model_n_feat:
+            self._train_mean = np.zeros(model_n_feat, dtype=np.float32)
+            self._train_std = np.ones(model_n_feat, dtype=np.float32)
 
         # Normalize
         context_norm = (context - self._train_mean) / self._train_std
@@ -359,6 +382,15 @@ class InfiltrationPredictor:
                 predicted_state = outputs["predicted_state"][0, last_idx].unsqueeze(0).unsqueeze(0)
                 input_seq = torch.cat([input_seq, predicted_state], dim=1)
 
+        # Multi-horizon anchor predictions (P1-A)
+        horizon_forecasts = None
+        if "horizon_predictions" in outputs:
+            horizon_forecasts = {}
+            for h_name, h_tensor in outputs["horizon_predictions"].items():
+                h_inf_logit = h_tensor[0, last_idx, -1]
+                h_inf_prob = torch.sigmoid(h_inf_logit).item()
+                horizon_forecasts[h_name] = round(float(h_inf_prob), 4)
+
         # Risk level assessment
         max_prob = max(probability_timeline)
         risk_level = self._assess_risk(probability_timeline, predicted_stage_indices)
@@ -377,6 +409,7 @@ class InfiltrationPredictor:
             max_infiltration_prob=max_prob,
             forecast_explanation=explanation,
             attention_weights=all_attention_weights if all_attention_weights else None,
+            horizon_forecasts=horizon_forecasts,
         )
 
     def _predict_empirical(
@@ -424,6 +457,12 @@ class InfiltrationPredictor:
             probability_timeline, predicted_stages, risk_level, driving_features_list
         )
 
+        horizon_offsets = {"h30": 1, "h60": 2, "h120": 4, "h300": 10}
+        horizon_forecasts = {}
+        for h_name, offset in horizon_offsets.items():
+            step_idx = min(offset - 1, len(probability_timeline) - 1)
+            horizon_forecasts[h_name] = probability_timeline[step_idx]
+
         return InfiltrationForecast(
             probability_timeline=probability_timeline,
             predicted_stages=predicted_stages,
@@ -433,6 +472,7 @@ class InfiltrationPredictor:
             max_infiltration_prob=max_prob,
             forecast_explanation=explanation,
             attention_weights=None,
+            horizon_forecasts=horizon_forecasts,
         )
 
     def _infer_initial_stage(self, feat_vec: np.ndarray) -> str:
@@ -597,8 +637,31 @@ def forecast_infiltration(
         "risk_level": forecast.risk_level,
         "max_infiltration_prob": forecast.max_infiltration_prob,
         "forecast_explanation": forecast.forecast_explanation,
+        "horizon_forecasts": forecast.horizon_forecasts,
         "k_steps": k_steps,
     }
+
+
+def forecast_infiltration_counterfactual(
+    flow_features: dict | np.ndarray,
+    k_steps: int = 5,
+    context_window: np.ndarray | None = None,
+    actions: list[str] | None = None,
+    model_path: str | None = None,
+) -> dict:
+    """Run action-conditioned counterfactual forward simulation for SOC decision support.
+
+    Evaluates defensive interventions (e.g. BLOCK_SRC, BLOCK_DST_PORT, THROTTLE)
+    against the baseline trajectory and returns risk deltas and recommended mitigation.
+    """
+    from ml.world_model.counterfactual import CounterfactualSimulator
+    simulator = CounterfactualSimulator(model_path=model_path)
+    return simulator.simulate(
+        current_features=flow_features,
+        k_steps=k_steps,
+        context_window=context_window,
+        actions=actions,
+    )
 
 
 if __name__ == "__main__":

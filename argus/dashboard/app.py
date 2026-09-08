@@ -469,6 +469,38 @@ def generate_nciipc(req: NCIIPCRequest):
 
 
 # ---------------------------------------------------------------------------
+# Counterfactual Simulation Endpoint (P1-C)
+# ---------------------------------------------------------------------------
+
+class CounterfactualRequest(BaseModel):
+    flow: dict | None = None
+    k_steps: int = 5
+    actions: list[str] | None = None
+
+
+@app.post("/api/forecast/counterfactual")
+def forecast_counterfactual_endpoint(req: CounterfactualRequest):
+    """Run action-conditioned counterfactual forward simulation for proactive SOC decision support."""
+    from ml.world_model.predictor import forecast_infiltration_counterfactual
+
+    flow = req.flow
+    if not flow:
+        df = generate_dataset(n_per_class=3, seed=random.randint(0, 999999))
+        row = df.sample(1).iloc[0]
+        flow = {col: float(row[col]) for col in FEATURE_COLUMNS}
+
+    try:
+        result = forecast_infiltration_counterfactual(
+            flow_features=flow,
+            k_steps=req.k_steps,
+            actions=req.actions,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Counterfactual simulation failed: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Dataset Sampling endpoint
 # ---------------------------------------------------------------------------
 

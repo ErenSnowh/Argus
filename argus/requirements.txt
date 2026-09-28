@@ -10,3 +10,7 @@ fastapi>=0.110
 uvicorn[standard]>=0.29
 python-multipart>=0.0.9
 pytest>=8.0
+# Dataset validation only: reads the CIC-IDS-2017 TrafficLabelling parquet
+# mirror in argus/data/raw/cicids2017/ (scripts/validate_cicids2017.py).
+pyarrow>=17.0
+

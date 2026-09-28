@@ -267,12 +267,34 @@ def test_dashboard_health_endpoint(api_client):
     assert isinstance(data["torch_available"], bool)
 
 
-def test_world_model_artifact_path_matches_model_module():
-    """The dashboard's cached artifact path must not drift from the model module."""
-    from dashboard.app import WORLD_MODEL_ARTIFACT
-    from ml.world_model.model import WORLD_MODEL_PATH
+def test_checkpoint_resolver_prefers_pretrained_when_artifacts_missing(tmp_path, monkeypatch):
+    """resolve_world_model_checkpoint() must find a committed pretrained checkpoint.
 
-    assert WORLD_MODEL_ARTIFACT == WORLD_MODEL_PATH
+    Regression lock: health used to read only ml/artifacts/, so after WP6 ships the
+    checkpoint in ml/pretrained/ it would report world_model_trained: false while
+    /api/forecast ran the neural engine.
+    """
+    from ml.world_model import model as model_mod
+
+    artifacts = tmp_path / "artifacts"
+    pretrained = tmp_path / "pretrained"
+    artifacts.mkdir()
+    pretrained.mkdir()
+    local = artifacts / "world_model.pt"
+    committed = pretrained / "world_model.pt"
+    monkeypatch.setattr(model_mod, "WORLD_MODEL_PATH", local)
+    monkeypatch.setattr(model_mod, "PRETRAINED_WORLD_MODEL_PATH", committed)
+
+    # Neither exists -> the default (artifacts) path is returned, not a crash.
+    assert model_mod.resolve_world_model_checkpoint() == local
+
+    # Only the committed checkpoint exists -> it must be found.
+    committed.write_bytes(b"not-a-real-checkpoint")
+    assert model_mod.resolve_world_model_checkpoint() == committed
+
+    # A local run wins when both are present.
+    local.write_bytes(b"not-a-real-checkpoint")
+    assert model_mod.resolve_world_model_checkpoint() == local
 
 
 def test_health_endpoint_works_without_torch():
@@ -505,11 +527,21 @@ def test_dashboard_benchmark_endpoint(api_client):
 
 
 def _assert_no_fabrication(resp) -> None:
-    text = resp.text
-    assert "CRITICAL" not in text, "fabricated CRITICAL result: " + text
-    assert "0.954" not in text, "fabricated probability constant: " + text
-    assert "67.5" not in text, "fabricated lead-time claim: " + text
-    assert "generate_dataset" not in text
+    """Structural lock: a rejected upload must not carry a forecast at all.
+
+    Asserts shape (HTTP status, no "forecast" key) rather than magic strings, and
+    keeps the historical constants as a secondary guard against a regression that
+    re-introduces the old hard-coded CRITICAL payload.
+    """
+    body = resp.json()
+    assert isinstance(body, dict)
+    assert "forecast" not in body, "rejected upload returned a forecast: " + str(body)
+    assert "probability_timeline" not in resp.text
+    if resp.status_code != 200:
+        assert "detail" in body, "error response must explain itself: " + str(body)
+    # Secondary guard: the old fabrication used these literals.
+    assert "0.954" not in resp.text
+    assert "67.5" not in resp.text
 
 
 def test_upload_rejects_csv_without_required_features(api_client):
@@ -524,7 +556,7 @@ def test_upload_rejects_csv_without_required_features(api_client):
 
 
 def test_upload_rejects_unparseable_pcap(api_client):
-    """A corrupt PCAP returns an error or packet evidence - never a forecast."""
+    """A corrupt PCAP is an error, never a forecast."""
     resp = api_client.post(
         "/api/upload",
         files={
@@ -535,14 +567,88 @@ def test_upload_rejects_unparseable_pcap(api_client):
             )
         },
     )
+    assert resp.status_code == 400
     _assert_no_fabrication(resp)
-    if resp.status_code == 200:
-        body = resp.json()
-        assert body["evidence_type"] == "pcap"
-        assert body["forecast"] is None
-        assert body["forecast_unavailable_reason"]
-    else:
-        assert resp.status_code == 400
+
+
+def test_upload_accepts_cicids_headers(api_client):
+    """A real CICFlowMeter export must be accepted, not rejected for snake_case.
+
+    Regression lock: the CSV branch compared against ARGUS's internal feature
+    names only, so uploading an actual CIC-IDS-2017 file returned 400.
+    """
+    header = ",".join(
+        [
+            "Total Fwd Packet", "Total Bwd packets", "Total Length of Fwd Packet",
+            "Total Length of Bwd Packet", "Fwd Packet Length Mean", "Fwd Packet Length Std",
+            "Bwd Packet Length Mean", "Bwd Packet Length Std", "Flow Bytes/s",
+            "Flow Packets/s", "SYN Flag Count", "ACK Flag Count", "RST Flag Count",
+            "PSH Flag Count", "FIN Flag Count", "URG Flag Count", "Flow Duration",
+            "Average Packet Size", "Down/Up Ratio", "Flow IAT Mean",
+            "Flow IAT Std", "Fwd IAT Mean", "Bwd IAT Mean",
+        ]
+    )
+    row = ",".join(["1.0"] * len(header.split(",")))
+    payload = (header + "\n" + row + "\n").encode()
+    resp = api_client.post(
+        "/api/upload", files={"file": ("cicids2017.csv", payload, "text/csv")}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["evidence_type"] == "flow"
+    assert body["features_extracted"] > 0
+
+
+def test_upload_pcap_forecasts_via_real_extractor(api_client):
+    """A real PCAP must reach the forecast through extract_features_from_pcap.
+
+    Regression lock against demoting the PCAP path to evidence-only: the repo
+    already ships a Scapy window extractor (ml/world_model/features.py), and it
+    must be the thing that produces the context_window.
+    """
+    from ml.world_model.features import NUM_FEATURES, extract_features_from_pcap
+
+    pcap = ROOT / "data" / "sample_portscan.pcap"
+    assert pcap.exists(), "sample_portscan.pcap fixture is missing"
+
+    # Extract from a private copy: the endpoint unlinks its own temp file, and
+    # the extractor must be proven on a path that still exists.
+    import shutil
+    import tempfile
+
+    # The handle must be closed before copying: on Windows an open temp file
+    # is locked and the copy is not reliably readable by scapy.
+    handle = tempfile.NamedTemporaryFile(suffix=".pcap", delete=False)
+    handle.close()
+    shutil.copyfile(pcap, handle.name)
+    local_pcap = Path(handle.name)
+    try:
+        window = extract_features_from_pcap(str(local_pcap), window_size=10)
+    finally:
+        local_pcap.unlink(missing_ok=True)
+    assert window.ndim == 2
+    assert window.shape[0] >= 1
+    assert window.shape[-1] == NUM_FEATURES
+    assert window.any(), "extractor produced an all-zero matrix for a real capture"
+
+    resp = api_client.post(
+        "/api/upload",
+        files={"file": ("portscan.pcap", pcap.read_bytes(), "application/vnd.tcpdump.pcap")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["evidence_type"] == "pcap"
+    assert body["features_extracted"] == NUM_FEATURES
+    assert body["forecast"] is not None, "PCAP upload fell back to evidence-only"
+    assert body["forecast"]["risk_level"] in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+    # The extraction must be disclosed, including its approximations.
+    fe = body["feature_extraction"]
+    assert fe["method"] == "pcap_window_v0"
+    assert fe["windows"] == int(window.shape[0])
+    assert isinstance(fe["approximations"], list) and fe["approximations"]
+    assert any("50/50" in a for a in fe["approximations"])
+    # The engine must be named, never implied.
+    assert body["forecast"]["engine"] in {"neural", "heuristic"}
 
 
 def test_upload_flow_csv_returns_a_real_forecast(api_client):
@@ -561,7 +667,15 @@ def test_upload_flow_csv_returns_a_real_forecast(api_client):
     assert body["features_extracted"] == len(FEATURE_COLUMNS)
     assert body["forecast"] is not None
     assert body["forecast"]["risk_level"] in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
-    assert "0.954" not in resp.text
+    assert body["forecast"]["engine"] in {"neural", "heuristic"}
+    # feature_coverage makes the zero-filled remainder explicit.
+    coverage = body["feature_coverage"]
+    assert coverage["supplied"] == len(FEATURE_COLUMNS)
+    assert coverage["world_model_features"] > coverage["supplied"]
+    assert len(coverage["absent_columns"]) == (
+        coverage["world_model_features"] - coverage["supplied"]
+    )
+    assert "note" in coverage
 
 
 

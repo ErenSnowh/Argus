@@ -58,9 +58,6 @@ ARTIFACTS_DIR = PROJECT_ROOT / "ml" / "artifacts"
 PRETRAINED_DIR = PROJECT_ROOT / "ml" / "pretrained"
 LOCAL_BENCHMARK_RESULTS = ARTIFACTS_DIR / "benchmark_results.json"
 PRETRAINED_BENCHMARK_RESULTS = PRETRAINED_DIR / "benchmark_results.json"
-# Must stay equal to ml.world_model.model.WORLD_MODEL_PATH (drift-guard test).
-WORLD_MODEL_ARTIFACT = ARTIFACTS_DIR / "world_model.pt"
-
 SAMPLE_PCAP = PROJECT_ROOT / "data" / "sample_portscan.pcap"
 AUDIT_LOG = AuditLogger(PROJECT_ROOT / "data" / "audit_log.jsonl")
 
@@ -96,12 +93,22 @@ def health():
     """
     import importlib.util
 
-    torch_available = importlib.util.find_spec("torch") is not None
+    from ml.world_model.model import resolve_world_model_checkpoint
+
+    try:
+        torch_available = importlib.util.find_spec("torch") is not None
+    except (ImportError, ValueError):
+        torch_available = False
+
+    checkpoint = resolve_world_model_checkpoint()
     return {
         "status": "ok",
         "rf_model_trained": METRICS_PATH.exists(),
-        "world_model_trained": WORLD_MODEL_ARTIFACT.exists() and torch_available,
+        "world_model_trained": checkpoint.exists() and torch_available,
         "torch_available": torch_available,
+        "world_model_source": (
+            checkpoint.name if checkpoint.exists() else None
+        ),
     }
 
 
@@ -563,7 +570,11 @@ def forecast_counterfactual_endpoint(req: CounterfactualRequest):
 # ---------------------------------------------------------------------------
 
 @app.post("/api/upload")
-async def upload_file_endpoint(file: UploadFile = File(...), k_steps: int = 5):
+async def upload_file_endpoint(
+    file: UploadFile = File(...),
+    k_steps: int = 5,
+    pcap_windows: int = 10,
+):
     """Analyse an uploaded telemetry file and forecast from it - or say why not.
 
     Truthfulness contract (WP1.5):
@@ -573,13 +584,11 @@ async def upload_file_endpoint(file: UploadFile = File(...), k_steps: int = 5):
       * Missing model inputs are reported, never silently zero-filled: a
         zero-filled vector yields a confident-looking forecast about data the
         caller did not send.
-      * A PCAP is packet evidence, not a CICFlowMeter flow record.
-        analyze_pcap_summary exposes packet_count, total_bytes, duration_sec,
-        top_src_ips, top_dst_ips, top_dst_ports, protocol_mix and
-        unique_dst_ports_contacted, from which at most a handful of the 24
-        flow features are honestly derivable. The response therefore reports
-        the packet evidence and states why no forecast was produced, instead of
-        inventing a feature vector.
+      * A PCAP is forecast through the real extractor
+        ml.world_model.features.extract_features_from_pcap(), whose output is
+        passed as the predictor's context_window. The response reports the
+        extraction method and its known approximations. Only a capture with no
+        usable IP packets falls back to evidence-only, and says so.
     """
     import io
     import tempfile
@@ -587,6 +596,7 @@ async def upload_file_endpoint(file: UploadFile = File(...), k_steps: int = 5):
     import pandas as pd
 
     from ml.flow_features import FEATURE_COLUMNS
+    from ml.world_model.features import WORLD_MODEL_FEATURES
     from ml.world_model.predictor import forecast_infiltration
 
     filename = file.filename or "upload"
@@ -599,15 +609,39 @@ async def upload_file_endpoint(file: UploadFile = File(...), k_steps: int = 5):
         # Parse in the OS temp directory. The repo's data/ dir is version
         # controlled, and on Windows scapy still holds the file handle when
         # analyze_pcap_summary returns, so cleanup has to be best-effort.
-        with tempfile.NamedTemporaryFile(suffix=".pcap", delete=False) as handle:
-            handle.write(contents)
-            temp_pcap = Path(handle.name)
-        try:
-            from mcp_server.pcap_forensics import analyze_pcap_summary
+        handle = tempfile.NamedTemporaryFile(suffix=".pcap", delete=False)
+        handle.write(contents)
+        handle.close()
+        temp_pcap = Path(handle.name)
 
-            pcap_summary = analyze_pcap_summary(str(temp_pcap))
-        except Exception as e:
-            pcap_summary = {"error": f"PCAP could not be parsed: {e}"}
+        # A real PCAP feature extractor already exists:
+        # ml.world_model.features.extract_features_from_pcap() groups packets
+        # into temporal windows and computes SYN/ACK/RST/PSH/FIN/URG counts,
+        # distinct destination ports, TTLs, TCP windows, IATs and topology
+        # features from Scapy. That is exactly the context_window the predictor
+        # consumes, so the PCAP path forecasts from measured packets rather
+        # than substituting a synthetic flow vector. Both readers must run
+        # before the temp file is removed.
+        window = None
+        pcap_summary = {}
+        try:
+            try:
+                from mcp_server.pcap_forensics import analyze_pcap_summary
+
+                pcap_summary = analyze_pcap_summary(str(temp_pcap))
+            except Exception as e:
+                pcap_summary = {"error": f"PCAP could not be parsed: {e}"}
+
+            if "error" not in pcap_summary:
+                from ml.world_model.features import extract_features_from_pcap
+
+                try:
+                    window = extract_features_from_pcap(
+                        str(temp_pcap), window_size=pcap_windows
+                    )
+                except Exception as e:
+                    window = None
+                    pcap_summary["feature_extraction_error"] = str(e)
         finally:
             try:
                 temp_pcap.unlink(missing_ok=True)
@@ -617,19 +651,44 @@ async def upload_file_endpoint(file: UploadFile = File(...), k_steps: int = 5):
         if "error" in pcap_summary:
             raise HTTPException(400, f"{filename}: {pcap_summary['error']}")
 
+        if window is None or window.ndim != 2 or window.size == 0 or not window.any():
+            return {
+                "filename": filename,
+                "evidence_type": "pcap",
+                "features_extracted": None,
+                "forecast": None,
+                "forecast_unavailable_reason": (
+                    "No IP packets with usable timestamps were found, so no "
+                    "feature window could be built. The packet summary is "
+                    "reported instead of substituting a synthetic flow vector."
+                ),
+                "pcap_summary": pcap_summary,
+            }
+
+        current = window[-1]
+        forecast_result = forecast_infiltration(
+            current, k_steps=k_steps, context_window=window
+        )
         return {
             "filename": filename,
             "evidence_type": "pcap",
-            "features_extracted": None,
-            "forecast": None,
-            "forecast_unavailable_reason": (
-                "A PCAP yields packet-level evidence, not the "
-                f"{len(FEATURE_COLUMNS)} CICFlowMeter flow features the forecast "
-                "requires. The packet summary is reported instead of substituting a "
-                "synthetic flow vector. Extending analyze_pcap_summary to emit "
-                "per-flow aggregates is tracked in docs/plan/world-model-core.md "
-                "(D1, risk 6)."
-            ),
+            "features_extracted": int(window.shape[-1]),
+            "forecast": forecast_result,
+            "feature_extraction": {
+                "method": "pcap_window_v0",
+                "source": "ml.world_model.features.extract_features_from_pcap",
+                "windows": int(window.shape[0]),
+                "approximations": [
+                    "forward/backward packet and byte counts are split 50/50 "
+                    "(a raw capture has no flow direction without reassembly)",
+                    "down_up_ratio is fixed at 0.5 for the same reason",
+                    "retransmission_count is approximated by the RST flag count",
+                    "fwd/bwd header lengths are fixed at 20 bytes",
+                    "topology counts are per-window, not cumulative host history",
+                    "windows are equal-duration slices of the capture, not "
+                    "fixed 60 s bins (WP2 replaces this for the real pipeline)",
+                ],
+            },
             "pcap_summary": pcap_summary,
         }
 
@@ -643,6 +702,16 @@ async def upload_file_endpoint(file: UploadFile = File(...), k_steps: int = 5):
 
     if df.empty:
         raise HTTPException(400, f"{filename}: the CSV contains no data rows.")
+
+    # Real datasets use CICFlowMeter's own header names, not ARGUS's internal
+    # ones. Run the repo's existing renames first, then match case-insensitively,
+    # so uploading a genuine CIC-IDS-2017/2018 export works instead of being
+    # rejected for missing snake_case columns.
+    from ml.world_model.dataset_loader import _CICIDS2017_COLUMN_MAP, _CICIDS_COLUMN_MAP
+
+    df.columns = [str(c).strip() for c in df.columns]
+    for mapping in (_CICIDS2017_COLUMN_MAP, _CICIDS_COLUMN_MAP):
+        df = df.rename(columns={k: v for k, v in mapping.items() if k in df.columns})
 
     row = df.iloc[0]
     by_lower = {str(c).lower(): c for c in df.columns}
@@ -659,28 +728,61 @@ async def upload_file_endpoint(file: UploadFile = File(...), k_steps: int = 5):
         except (TypeError, ValueError):
             unparseable.append(col)
 
-    if missing:
+    # A real CICFlowMeter export does not carry every RF column:
+    # `unique_dst_ports_per_src` and `packets_per_flow` are derived by
+    # CICFlowMeter rather than exported, so a genuine dataset file is short
+    # two of the 24. Require a strong match (>= 80% of the columns) instead
+    # of demanding all 24, and list whatever is absent.
+    if missing and len(missing) > 0.2 * len(FEATURE_COLUMNS):
         shown = ", ".join(missing[:8]) + (", ..." if len(missing) > 8 else "")
         raise HTTPException(
             400,
             f"{filename}: cannot analyse this file - {len(missing)} of "
             f"{len(FEATURE_COLUMNS)} required flow features are absent ({shown}). "
-            "No forecast is produced and no values are substituted. Export "
-            "CICFlowMeter-style flow columns (see ml/flow_features.py).",
+            "No forecast is produced and no values are substituted. Accepted "
+            "header formats: the ARGUS names in ml/flow_features.py, or a "
+            "CICFlowMeter export (CIC-IDS-2017/2018 names such as "
+            "'Total Fwd Packet', 'Flow IAT Mean', 'SYN Flag Count'), which are "
+            "renamed automatically.",
         )
     if unparseable:
         shown = ", ".join(unparseable[:8]) + (", ..." if len(unparseable) > 8 else "")
         raise HTTPException(400, f"{filename}: non-numeric or missing values in: {shown}.")
+
+    if missing:
+        # Partial but genuine match: the absent columns are derived rather than
+        # exported, so they are passed as zeros and declared in the response.
+        pass
 
     try:
         forecast_result = forecast_infiltration(features, k_steps=k_steps)
     except (FileNotFoundError, ImportError) as e:
         raise HTTPException(503, f"Forecast engine unavailable: {e}")
 
+    # The forecast consumes the 46-column world-model schema, but a
+    # CICFlowMeter export carries the 24 flow-level columns. State plainly
+    # which columns were measured and which are absent, instead of letting
+    # a zero-filled vector read as a full measurement.
+    supplied = [c for c in WORLD_MODEL_FEATURES if c in features]
+    absent = [c for c in WORLD_MODEL_FEATURES if c not in features]
+
     return {
         "filename": filename,
         "evidence_type": "flow",
         "features_extracted": len(features),
+        "feature_coverage": {
+            "supplied": len(supplied),
+            "world_model_features": len(WORLD_MODEL_FEATURES),
+            "supplied_columns": supplied,
+            "absent_columns": absent,
+            "note": (
+                "The world model expects "
+                f"{len(WORLD_MODEL_FEATURES)} columns; a flow CSV supplies "
+                f"{len(supplied)}. Absent columns are passed as zeros and are "
+                "listed here. Packet-level and topology columns require a PCAP "
+                "upload or the WP2 real-data pipeline."
+            ),
+        },
         "forecast": forecast_result,
     }
 

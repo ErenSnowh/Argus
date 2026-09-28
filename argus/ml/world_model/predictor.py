@@ -31,10 +31,10 @@ from ml.world_model.features import (
     WORLD_MODEL_FEATURES,
 )
 from ml.world_model.model import (
-    WORLD_MODEL_PATH,
     InfiltrationForecast,
     WorldModelTransformer,
     _check_torch,
+    resolve_world_model_checkpoint,
 )
 
 try:
@@ -227,7 +227,11 @@ class InfiltrationPredictor:
 
     def __init__(self, model_path: str | None = None):
         self._model = None
-        self._model_path = Path(model_path) if model_path else WORLD_MODEL_PATH
+        # None means "whichever checkpoint this deployment has": a local run
+        # in artifacts/ if present, otherwise the committed pretrained/ copy.
+        self._model_path = (
+            Path(model_path) if model_path else resolve_world_model_checkpoint()
+        )
         self._train_mean = None
         self._train_std = None
         self._explainer = AttentionExplainer()
@@ -639,6 +643,12 @@ def forecast_infiltration(
         "forecast_explanation": forecast.forecast_explanation,
         "horizon_forecasts": forecast.horizon_forecasts,
         "k_steps": k_steps,
+        # Which engine produced this. "neural" means a checkpoint was loaded
+        # and the Transformer produced the rollout; "heuristic" means no
+        # checkpoint is available and the kill-chain prior did. Consumers
+        # (dashboard, MCP tools, CLI, reports) must not present one as the
+        # other. See docs/plan/world-model-core.md (D5).
+        "engine": "neural" if predictor.is_model_loaded() else "heuristic",
     }
 
 

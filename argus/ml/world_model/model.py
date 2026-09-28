@@ -37,6 +37,29 @@ MODEL_DIR = Path(__file__).parent.parent / "artifacts"
 WORLD_MODEL_PATH = MODEL_DIR / "world_model.pt"
 WORLD_MODEL_METRICS_PATH = MODEL_DIR / "world_model_metrics.json"
 
+# Committed checkpoint directory. Unlike artifacts/ this is tracked by git,
+# so a fresh clone and the evaluator can run the neural path without training.
+PRETRAINED_MODEL_DIR = Path(__file__).parent.parent / "pretrained"
+PRETRAINED_WORLD_MODEL_PATH = PRETRAINED_MODEL_DIR / WORLD_MODEL_PATH.name
+
+
+def resolve_world_model_checkpoint() -> Path:
+    """Return the checkpoint this deployment should load, or the default path.
+
+    Lookup order:
+      1. ml/artifacts/world_model.pt  - a local training run (gitignored)
+      2. ml/pretrained/world_model.pt - the committed checkpoint
+
+    Every consumer (the predictor loader, get_model_info and the dashboard
+    health endpoint) calls this, so /api/health can never disagree with what
+    /api/forecast actually runs. Callers that need to know whether a
+    checkpoint exists must test ``.exists()`` on the result.
+    """
+    for candidate in (WORLD_MODEL_PATH, PRETRAINED_WORLD_MODEL_PATH):
+        if candidate.exists():
+            return candidate
+    return WORLD_MODEL_PATH
+
 # Try importing PyTorch — if unavailable, the module still loads
 # but WorldModelTransformer.is_available() returns False.
 try:

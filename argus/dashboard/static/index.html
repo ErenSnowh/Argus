@@ -509,12 +509,12 @@
                   <div class="flex items-center justify-between">
                     <span class="font-headline-sm font-bold text-primary uppercase text-[11px] tracking-wide flex items-center gap-1.5">
                       <span>PREDICTIVE RATIONALE &amp; EXPLANATION</span>
-                      <span class="px-1.5 py-0.2 rounded bg-primary/15 text-primary text-[9px] font-badge-micro font-bold border border-primary/20">+67.5s EARLY WARNING</span>
+                      <span class="px-1.5 py-0.2 rounded bg-outline/15 text-outline text-[9px] font-badge-micro font-bold border border-outline/20">LEAD TIME: NOT YET MEASURED</span>
                     </span>
                     <span class="text-[10px] font-telemetry-data text-outline">P(S_{t+1} | S_t) Dynamical Rollout</span>
                   </div>
                   <p id="forecast-explanation-text" class="text-on-surface text-xs leading-relaxed font-body">
-                    Autoregressive World Model rollout projects an escalating kill-chain progression from reconnaissance port scans to credential harvesting and lateral movement. Peak attack probability reaches 95.4% at T+300s, providing defense operators with an advance containment lead time of +67.5 seconds before SCADA/domain controller isolation becomes critical.
+                    ILLUSTRATIVE PANEL - no dataset result is loaded. These figures are placeholder copy, not a measurement: lead-time and peak-probability numbers appear here only once `argus benchmark` has written a results JSON with a provenance block (see docs/plan/world-model-core.md, WP5/WP6).
                   </p>
                 </div>
               </div>
@@ -1389,7 +1389,7 @@
           }
           const why2 = document.getElementById('forecast-explanation-text');
           if (why2 && fc.forecast_explanation) { why2.textContent = fc.forecast_explanation; }
-          const engine = fc.engine ? ` (engine: ${fc.engine})` : "";
+          const engine = fc.engine ? ` (engine: ${fc.engine})` : " (engine: unreported)";
           const prov = fc.model_provenance && fc.model_provenance.source
             ? fc.model_provenance.source
             : "no provenance reported";
@@ -1406,21 +1406,21 @@
         document.getElementById('card-max-risk').textContent = "87.5% Max Risk";
         document.getElementById('forecast-risk-pill').textContent = "HIGH RISK: 87.5%";
         if (expEl) {
-          expEl.textContent = "Scenario B [CTU-13 Botnet]: C2 beaconing detected with 120s periodicity. World Model predicts automated lateral propagation to SCADA subnet in 87.5% probability, granting a +67.5s window to sever C2 uplink.";
+          expEl.textContent = "ILLUSTRATIVE SCENARIO B - CTU-13 botnet shape. No CIC-IDS/CTU-13 result is loaded, so the probabilities below are a prewritten demo, not a measurement. Click Simulate to run the real engine on your own telemetry.";
         }
         showToast("Switched to Scenario B: Mirai C2 Botnet Beaconing [CTU-13]", "info");
       } else if (val === 'scenario-c') {
         document.getElementById('card-max-risk').textContent = "98.2% Max Risk";
         document.getElementById('forecast-risk-pill').textContent = "CRITICAL RISK: 98.2%";
         if (expEl) {
-          expEl.textContent = "Scenario C [CIC-IDS-2017]: Coordinated multi-vector SYN/UDP volumetric flood detected. Rollout forecasts total link saturation within 60s, triggering automated eBPF rate-limiting rules.";
+          expEl.textContent = "ILLUSTRATIVE SCENARIO C - CIC-IDS-2017 flood shape. No dataset result is loaded, so the probabilities below are a prewritten demo, not a measurement. Click Simulate to run the real engine on your own telemetry.";
         }
         showToast("Switched to Scenario C: Multi-Vector DDoS Flood [CIC-IDS-2017]", "info");
       } else {
         document.getElementById('card-max-risk').textContent = "95.4% Max Risk";
         document.getElementById('forecast-risk-pill').textContent = "CRITICAL RISK: 95.4%";
         if (expEl) {
-          expEl.textContent = "Scenario A [CSE-CIC-2018]: Multi-stage reconnaissance and lateral SMB infiltration detected. Autoregressive rollout predicts lateral spread to domain controller (10.240.1.15) at T+300s, providing +67.5s advance lead time.";
+          expEl.textContent = "ILLUSTRATIVE SCENARIO A - CSE-CIC-2018 infiltration shape. No dataset result is loaded, so the probabilities below are a prewritten demo, not a measurement. Click Simulate to run the real engine on your own telemetry.";
         }
         showToast("Switched to Scenario A: Lateral Infiltration & SMB Exfil [CSE-CIC-2018]", "info");
       }

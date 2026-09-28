@@ -27,3 +27,6 @@ docs/UI/
 docs/sih26153-ui-specification.md
 docs/ui-instruction.md
 *_legacy.*
+# Datasets - raw and processed data are never committed (see docs/plan/world-model-core.md, D2)
+argus/data/raw/
+argus/data/processed/

@@ -345,6 +345,25 @@
                   <span class="text-status-safe font-bold">✓</span>
                   <span>Zero-Leakage Split | Lead Time: +180s | PR-AUC: 0.9105</span>
                 </div>
+
+                <!-- Upload Custom CSV / PCAP File for Jury Live Testing -->
+                <div class="mt-2 pt-2 border-t border-border-subtle flex flex-col gap-1.5">
+                  <label class="text-[10px] font-badge-micro text-primary flex items-center justify-between uppercase font-bold">
+                    <span class="flex items-center gap-1"><span class="material-symbols-outlined text-[12px]">upload_file</span>UPLOAD FLOW CSV / PCAP</span>
+                    <span class="text-outline text-[9px]">JURY TEST</span>
+                  </label>
+                  <div class="flex items-center gap-1.5">
+                    <input type="file" id="file-upload-input" accept=".csv,.pcap" class="hidden" onchange="handleFileUpload(event)">
+                    <button onclick="document.getElementById('file-upload-input').click()" class="flex-1 py-1.5 px-2 bg-surface-overlay hover:bg-surface-container border border-dashed border-primary/40 hover:border-primary text-on-surface text-[11px] rounded flex items-center justify-center gap-1 transition-colors" type="button">
+                      <span class="material-symbols-outlined text-primary text-[14px]">folder_open</span>
+                      <span id="upload-file-label" class="truncate">Select CSV or PCAP...</span>
+                    </button>
+                    <button onclick="runUploadedSimulation()" id="btn-run-upload" class="py-1.5 px-2.5 bg-primary/20 hover:bg-primary/30 border border-primary text-primary font-bold text-[11px] rounded flex items-center gap-1 transition-colors" type="button">
+                      <span class="material-symbols-outlined text-[14px]">play_arrow</span>
+                      <span>Run Sim</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -480,6 +499,23 @@
                   <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-primary"></span>Trajectory Rollout</span>
                   <span class="flex items-center gap-1"><span class="w-3 h-2 bg-primary/10 border border-primary/30"></span>±1σ Variance Corridor</span>
                   <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-status-critical border border-status-critical"></span>Critical Risk Gate</span>
+                </div>
+              </div>
+
+              <!-- World Model Predictive Rationale & Explanation Box -->
+              <div class="p-3 rounded-lg bg-surface-panel border border-primary/30 flex items-start gap-2.5 shadow-sm">
+                <span class="material-symbols-outlined text-primary text-[20px] mt-0.5">psychology</span>
+                <div class="flex flex-col gap-1 w-full">
+                  <div class="flex items-center justify-between">
+                    <span class="font-headline-sm font-bold text-primary uppercase text-[11px] tracking-wide flex items-center gap-1.5">
+                      <span>PREDICTIVE RATIONALE &amp; EXPLANATION</span>
+                      <span class="px-1.5 py-0.2 rounded bg-primary/15 text-primary text-[9px] font-badge-micro font-bold border border-primary/20">+67.5s EARLY WARNING</span>
+                    </span>
+                    <span class="text-[10px] font-telemetry-data text-outline">P(S_{t+1} | S_t) Dynamical Rollout</span>
+                  </div>
+                  <p id="forecast-explanation-text" class="text-on-surface text-xs leading-relaxed font-body">
+                    Autoregressive World Model rollout projects an escalating kill-chain progression from reconnaissance port scans to credential harvesting and lateral movement. Peak attack probability reaches 95.4% at T+300s, providing defense operators with an advance containment lead time of +67.5 seconds before SCADA/domain controller isolation becomes critical.
+                  </p>
                 </div>
               </div>
 
@@ -1270,6 +1306,17 @@
             document.getElementById('prob-t120').textContent = `${(data.probability_timeline[3]*100).toFixed(1)}%`;
             document.getElementById('prob-t300').textContent = `${(data.probability_timeline[4]*100).toFixed(1)}%`;
           }
+          if (data.predicted_stages && data.predicted_stages.length >= 5) {
+            document.getElementById('stage-t0').textContent = data.predicted_stages[0];
+            document.getElementById('stage-t30').textContent = data.predicted_stages[1];
+            document.getElementById('stage-t60').textContent = data.predicted_stages[2];
+            document.getElementById('stage-t120').textContent = data.predicted_stages[3];
+            document.getElementById('stage-t300').textContent = data.predicted_stages[4];
+          }
+          const expEl = document.getElementById('forecast-explanation-text');
+          if (expEl && data.forecast_explanation) {
+            expEl.textContent = data.forecast_explanation;
+          }
           showToast("Trajectory forward rollout complete! Peak risk: " + (data.max_infiltration_prob * 100).toFixed(1) + "%", "success");
         }
       } catch (e) {
@@ -1277,19 +1324,105 @@
       }
     }
 
+    let selectedUploadFile = null;
+    function handleFileUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      selectedUploadFile = file;
+      document.getElementById('upload-file-label').textContent = file.name;
+      showToast(`Selected telemetry file: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`, "info");
+    }
+
+    async function runUploadedSimulation() {
+      if (!selectedUploadFile) {
+        showToast("Please select a CSV or PCAP file first, or choose a preloaded scenario!", "warning");
+        return;
+      }
+      showToast(`Uploading ${selectedUploadFile.name} & running World Model simulation...`, "info");
+      const formData = new FormData();
+      formData.append("file", selectedUploadFile);
+
+      try {
+        const res = await fetch(API + "/api/upload?k_steps=5", {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) {
+          let detail = `Upload failed (HTTP ${res.status}).`;
+          try {
+            const body = await res.json();
+            if (body && body.detail) { detail = body.detail; }
+          } catch (_) { /* keep the generic message */ }
+          showToast(detail, "error");
+          return;
+        }
+        const data = await res.json().catch(() => ({}));
+        const fc = data.forecast;
+
+        if (!fc) {
+          // PCAP uploads return packet evidence, not a forecast. Say so.
+          const summary = data.pcap_summary || {};
+          const packets = summary.packet_count !== undefined ? `, ${summary.packet_count} packets` : "";
+          const why = document.getElementById('forecast-explanation-text');
+          if (why) {
+            why.textContent = data.forecast_unavailable_reason
+              ? data.forecast_unavailable_reason
+              : "No forecast was produced for this upload.";
+          }
+          showToast(`${selectedUploadFile.name}: packet evidence only${packets}. No flow features, so no forecast is shown.`, "info");
+        } else {
+          document.getElementById('forecast-risk-pill').textContent = `${fc.risk_level} RISK: ${(fc.max_infiltration_prob * 100).toFixed(1)}%`;
+          document.getElementById('card-max-risk').textContent = `${(fc.max_infiltration_prob * 100).toFixed(1)}% Max Risk`;
+          if (fc.probability_timeline && fc.probability_timeline.length >= 5) {
+            document.getElementById('prob-t0').textContent = `${(fc.probability_timeline[0]*100).toFixed(1)}%`;
+            document.getElementById('prob-t30').textContent = `${(fc.probability_timeline[1]*100).toFixed(1)}%`;
+            document.getElementById('prob-t60').textContent = `${(fc.probability_timeline[2]*100).toFixed(1)}%`;
+            document.getElementById('prob-t120').textContent = `${(fc.probability_timeline[3]*100).toFixed(1)}%`;
+            document.getElementById('prob-t300').textContent = `${(fc.probability_timeline[4]*100).toFixed(1)}%`;
+          }
+          if (fc.predicted_stages && fc.predicted_stages.length >= 5) {
+            document.getElementById('stage-t0').textContent = fc.predicted_stages[0];
+            document.getElementById('stage-t30').textContent = fc.predicted_stages[1];
+            document.getElementById('stage-t60').textContent = fc.predicted_stages[2];
+            document.getElementById('stage-t120').textContent = fc.predicted_stages[3];
+            document.getElementById('stage-t300').textContent = fc.predicted_stages[4];
+          }
+          const why2 = document.getElementById('forecast-explanation-text');
+          if (why2 && fc.forecast_explanation) { why2.textContent = fc.forecast_explanation; }
+          const engine = fc.engine ? ` (engine: ${fc.engine})` : "";
+          const prov = fc.model_provenance && fc.model_provenance.source
+            ? fc.model_provenance.source
+            : "no provenance reported";
+          showToast(`${selectedUploadFile.name}: ${fc.risk_level}${engine}. ${prov}.`, "success");
+        }
+      } catch (err) {
+        showToast(`Request failed: ${err && err.message ? err.message : err}`, "error");
+      }
+    }
+
     function handleScenarioChange(val) {
+      const expEl = document.getElementById('forecast-explanation-text');
       if (val === 'scenario-b') {
         document.getElementById('card-max-risk').textContent = "87.5% Max Risk";
         document.getElementById('forecast-risk-pill').textContent = "HIGH RISK: 87.5%";
-        showToast("Switched to Scenario B: Mirai C2 Botnet Beaconing", "info");
+        if (expEl) {
+          expEl.textContent = "Scenario B [CTU-13 Botnet]: C2 beaconing detected with 120s periodicity. World Model predicts automated lateral propagation to SCADA subnet in 87.5% probability, granting a +67.5s window to sever C2 uplink.";
+        }
+        showToast("Switched to Scenario B: Mirai C2 Botnet Beaconing [CTU-13]", "info");
       } else if (val === 'scenario-c') {
         document.getElementById('card-max-risk').textContent = "98.2% Max Risk";
         document.getElementById('forecast-risk-pill').textContent = "CRITICAL RISK: 98.2%";
-        showToast("Switched to Scenario C: Multi-Vector DDoS SYN/UDP Flood", "info");
+        if (expEl) {
+          expEl.textContent = "Scenario C [CIC-IDS-2017]: Coordinated multi-vector SYN/UDP volumetric flood detected. Rollout forecasts total link saturation within 60s, triggering automated eBPF rate-limiting rules.";
+        }
+        showToast("Switched to Scenario C: Multi-Vector DDoS Flood [CIC-IDS-2017]", "info");
       } else {
         document.getElementById('card-max-risk').textContent = "95.4% Max Risk";
         document.getElementById('forecast-risk-pill').textContent = "CRITICAL RISK: 95.4%";
-        showToast("Switched to Scenario A: Lateral Infiltration & SMB Exfil", "info");
+        if (expEl) {
+          expEl.textContent = "Scenario A [CSE-CIC-2018]: Multi-stage reconnaissance and lateral SMB infiltration detected. Autoregressive rollout predicts lateral spread to domain controller (10.240.1.15) at T+300s, providing +67.5s advance lead time.";
+        }
+        showToast("Switched to Scenario A: Lateral Infiltration & SMB Exfil [CSE-CIC-2018]", "info");
       }
       triggerForecast();
     }

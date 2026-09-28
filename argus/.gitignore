@@ -17,3 +17,6 @@ data/audit_log.jsonl
 
 venv/
 .venv/
+# Datasets - raw and processed data are never committed (see docs/plan/world-model-core.md, D2)
+data/raw/
+data/processed/

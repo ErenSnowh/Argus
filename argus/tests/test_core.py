@@ -15,6 +15,7 @@ docstring and README "Testing" section for how to validate that layer.
 from __future__ import annotations
 
 import hashlib
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -257,8 +258,55 @@ def test_dashboard_health_endpoint(api_client):
     resp = api_client.get("/api/health")
     assert resp.status_code == 200
     data = resp.json()
-    assert "status" in data
     assert data["status"] == "ok"
+    # WP0: `model_trained` was the RF metrics file read as if it described the
+    # world model. The ambiguous field is removed, not merely shadowed.
+    assert "model_trained" not in data
+    assert isinstance(data["rf_model_trained"], bool)
+    assert isinstance(data["world_model_trained"], bool)
+    assert isinstance(data["torch_available"], bool)
+
+
+def test_world_model_artifact_path_matches_model_module():
+    """The dashboard's cached artifact path must not drift from the model module."""
+    from dashboard.app import WORLD_MODEL_ARTIFACT
+    from ml.world_model.model import WORLD_MODEL_PATH
+
+    assert WORLD_MODEL_ARTIFACT == WORLD_MODEL_PATH
+
+
+def test_health_endpoint_works_without_torch():
+    """WP0: /api/health must answer on a machine where PyTorch is not installed.
+
+    Runs the endpoint in a subprocess where every `torch` import and every
+    find_spec("torch") lookup raises, so the torch-less deployment case is
+    exercised for real instead of asserted in prose.
+    """
+    code = (
+        "import builtins, importlib.util, sys\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        "_real_import = builtins.__import__\n"
+        "def _no_torch(name, *a, **k):\n"
+        "    if name == 'torch' or name.startswith('torch.'):\n"
+        "        raise ImportError('torch disabled by test')\n"
+        "    return _real_import(name, *a, **k)\n"
+        "builtins.__import__ = _no_torch\n"
+        "_real_find = importlib.util.find_spec\n"
+        "importlib.util.find_spec = lambda n, *a, **k: (\n"
+        "    None if n == 'torch' else _real_find(n, *a, **k))\n"
+        "from dashboard.app import health\n"
+        "r = health()\n"
+        "assert r['status'] == 'ok', r\n"
+        "assert r['torch_available'] is False, r\n"
+        "assert r['world_model_trained'] is False, r\n"
+        "assert isinstance(r['rf_model_trained'], bool), r\n"
+        "print('WP0-NO-TORCH-OK')\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, cwd=str(ROOT)
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "WP0-NO-TORCH-OK" in proc.stdout
 
 
 def test_dashboard_favicon_endpoint(api_client):
@@ -424,13 +472,96 @@ def test_dashboard_investigate_includes_forecast(api_client):
 
 
 def test_dashboard_benchmark_endpoint(api_client):
-    """Verify /api/benchmark returns 200 and benchmark baseline comparison."""
+    """Verify /api/benchmark serves committed results, or is honestly absent."""
+    from dashboard.app import (
+        LOCAL_BENCHMARK_RESULTS,
+        PRETRAINED_BENCHMARK_RESULTS,
+    )
+
+    if not (LOCAL_BENCHMARK_RESULTS.exists() or PRETRAINED_BENCHMARK_RESULTS.exists()):
+        pytest.skip(
+            "No benchmark result artifact: neither ml/artifacts/benchmark_results.json "
+            "(local run: `argus benchmark`) nor ml/pretrained/benchmark_results.json "
+            "(committed) exists. Temporary skip until WP6 ships real-data results."
+        )
+
     resp = api_client.get("/api/benchmark")
     assert resp.status_code == 200
     data = resp.json()
     assert "logistic_regression" in data
     assert "world_model" in data
     assert "accuracy" in data["logistic_regression"]
+
+
+# ---------------------------------------------------------------------------
+# WP1.5 -- upload must never fabricate a forecast
+#
+# Before this change /api/upload answered an unparseable file with a
+# hard-coded CRITICAL result (0.954, +67.5s) built from a synthetic sample, and
+# the UI toasted success. These three tests are the lock on that never
+# returning: two assert absence on the failure paths, one proves the honest
+# path still works.
+# ---------------------------------------------------------------------------
+
+
+def _assert_no_fabrication(resp) -> None:
+    text = resp.text
+    assert "CRITICAL" not in text, "fabricated CRITICAL result: " + text
+    assert "0.954" not in text, "fabricated probability constant: " + text
+    assert "67.5" not in text, "fabricated lead-time claim: " + text
+    assert "generate_dataset" not in text
+
+
+def test_upload_rejects_csv_without_required_features(api_client):
+    """A file missing the model's inputs must fail loudly, not be zero-filled."""
+    resp = api_client.post(
+        "/api/upload",
+        files={"file": ("junk.csv", b"col_a,col_b\n1,2\n3,4\n", "text/csv")},
+    )
+    assert resp.status_code == 400
+    assert "required flow features are absent" in resp.json()["detail"]
+    _assert_no_fabrication(resp)
+
+
+def test_upload_rejects_unparseable_pcap(api_client):
+    """A corrupt PCAP returns an error or packet evidence - never a forecast."""
+    resp = api_client.post(
+        "/api/upload",
+        files={
+            "file": (
+                "broken.pcap",
+                b"\x00\x01\x02\x03 not-a-pcap-file",
+                "application/vnd.tcpdump.pcap",
+            )
+        },
+    )
+    _assert_no_fabrication(resp)
+    if resp.status_code == 200:
+        body = resp.json()
+        assert body["evidence_type"] == "pcap"
+        assert body["forecast"] is None
+        assert body["forecast_unavailable_reason"]
+    else:
+        assert resp.status_code == 400
+
+
+def test_upload_flow_csv_returns_a_real_forecast(api_client):
+    """A CSV carrying the real feature set must still produce a forecast."""
+    import pandas as pd
+
+    from ml.flow_features import FEATURE_COLUMNS
+
+    payload = pd.DataFrame([{col: 1.0 for col in FEATURE_COLUMNS}]).to_csv(index=False)
+    resp = api_client.post(
+        "/api/upload", files={"file": ("flows.csv", payload.encode(), "text/csv")}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["evidence_type"] == "flow"
+    assert body["features_extracted"] == len(FEATURE_COLUMNS)
+    assert body["forecast"] is not None
+    assert body["forecast"]["risk_level"] in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+    assert "0.954" not in resp.text
 
 
 

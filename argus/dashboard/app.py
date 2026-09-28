@@ -16,6 +16,14 @@ Enhanced with:
 
 from __future__ import annotations
 
+import logging
+import warnings
+# Suppress cosmetic Scapy warnings on Windows (libpcap/Npcap absent for live capture)
+logging.getLogger("scapy").setLevel(logging.ERROR)
+logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", category=UserWarning, module="scapy")
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="scapy")
+
 import asyncio
 import json
 import random
@@ -24,7 +32,7 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response, UploadFile, File
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -42,6 +50,17 @@ from security.guardrails import AuditLogger  # noqa: E402
 app = FastAPI(title="ARGUS SOC Co-Pilot API")
 
 METRICS_PATH = PROJECT_ROOT / "ml" / "artifacts" / "metrics.json"
+
+# Model artifact locations. "artifacts/" is gitignored and holds local runs;
+# "pretrained/" is committed and is what a fresh clone / the judge sees.
+# Consumers fall back in that order and never invent a result.
+ARTIFACTS_DIR = PROJECT_ROOT / "ml" / "artifacts"
+PRETRAINED_DIR = PROJECT_ROOT / "ml" / "pretrained"
+LOCAL_BENCHMARK_RESULTS = ARTIFACTS_DIR / "benchmark_results.json"
+PRETRAINED_BENCHMARK_RESULTS = PRETRAINED_DIR / "benchmark_results.json"
+# Must stay equal to ml.world_model.model.WORLD_MODEL_PATH (drift-guard test).
+WORLD_MODEL_ARTIFACT = ARTIFACTS_DIR / "world_model.pt"
+
 SAMPLE_PCAP = PROJECT_ROOT / "data" / "sample_portscan.pcap"
 AUDIT_LOG = AuditLogger(PROJECT_ROOT / "data" / "audit_log.jsonl")
 
@@ -61,7 +80,29 @@ class InvestigateRequest(BaseModel):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "model_trained": METRICS_PATH.exists()}
+    """Liveness + which models this deployment can actually serve.
+
+    rf_model_trained     Random Forest flow classifier artifact exists.
+    world_model_trained  Transformer checkpoint exists AND torch is
+                         importable, i.e. the neural path can really run.
+    torch_available      Whether PyTorch is installed here.
+
+    The previous single field `model_trained` was derived from the Random
+    Forest metrics file but was read as if it described the world model. A
+    checkpoint on disk without torch is NOT reported as trained, because the
+    served forecast would then be the heuristic prior. Availability is probed
+    with importlib.util.find_spec, which does not import torch, so this
+    endpoint answers on a machine without PyTorch.
+    """
+    import importlib.util
+
+    torch_available = importlib.util.find_spec("torch") is not None
+    return {
+        "status": "ok",
+        "rf_model_trained": METRICS_PATH.exists(),
+        "world_model_trained": WORLD_MODEL_ARTIFACT.exists() and torch_available,
+        "torch_available": torch_available,
+    }
 
 
 @app.get("/api/config")
@@ -344,11 +385,28 @@ def world_model_status():
 
 @app.get("/api/benchmark")
 def benchmark_results():
-    """Return benchmark comparison results (World Model vs Logistic Regression)."""
-    benchmark_path = PROJECT_ROOT / "ml" / "artifacts" / "benchmark_results.json"
-    if not benchmark_path.exists():
-        raise HTTPException(404, "Benchmark not run yet. Run `argus benchmark` first.")
-    return json.loads(benchmark_path.read_text())
+    """Return the committed benchmark results, or 404. Never a substitute.
+
+    Lookup order:
+      1. ml/artifacts/benchmark_results.json  - local run (gitignored)
+      2. ml/pretrained/benchmark_results.json - committed; what a fresh clone
+         and the evaluator see (shipped by WP6)
+
+    The file is returned verbatim and is expected to carry its own
+    `provenance` block (dataset, files, rows, split protocol, git SHA, UTC
+    timestamp). If neither file exists the endpoint 404s rather than returning
+    synthetic or remembered numbers.
+    """
+    for candidate in (LOCAL_BENCHMARK_RESULTS, PRETRAINED_BENCHMARK_RESULTS):
+        if candidate.exists():
+            return json.loads(candidate.read_text())
+    raise HTTPException(
+        404,
+        "No benchmark results available: neither "
+        f"{LOCAL_BENCHMARK_RESULTS} (local run: `argus benchmark`) nor "
+        f"{PRETRAINED_BENCHMARK_RESULTS} (committed) exists. No numbers are "
+        "fabricated; see docs/plan/world-model-core.md.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -498,6 +556,133 @@ def forecast_counterfactual_endpoint(req: CounterfactualRequest):
         return result
     except Exception as e:
         raise HTTPException(500, f"Counterfactual simulation failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Upload CSV / PCAP & Simulate Endpoint (SIH Jury Live Testing)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/upload")
+async def upload_file_endpoint(file: UploadFile = File(...), k_steps: int = 5):
+    """Analyse an uploaded telemetry file and forecast from it - or say why not.
+
+    Truthfulness contract (WP1.5):
+      * The uploaded bytes are the only telemetry used. If they cannot be
+        parsed the request fails with the parser's own message. A synthetic
+        sample is never substituted and a forecast is never fabricated.
+      * Missing model inputs are reported, never silently zero-filled: a
+        zero-filled vector yields a confident-looking forecast about data the
+        caller did not send.
+      * A PCAP is packet evidence, not a CICFlowMeter flow record.
+        analyze_pcap_summary exposes packet_count, total_bytes, duration_sec,
+        top_src_ips, top_dst_ips, top_dst_ports, protocol_mix and
+        unique_dst_ports_contacted, from which at most a handful of the 24
+        flow features are honestly derivable. The response therefore reports
+        the packet evidence and states why no forecast was produced, instead of
+        inventing a feature vector.
+    """
+    import io
+    import tempfile
+
+    import pandas as pd
+
+    from ml.flow_features import FEATURE_COLUMNS
+    from ml.world_model.predictor import forecast_infiltration
+
+    filename = file.filename or "upload"
+    lowered = filename.lower()
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(400, f"{filename}: the uploaded file is empty.")
+
+    if lowered.endswith((".pcap", ".pcapng")):
+        # Parse in the OS temp directory. The repo's data/ dir is version
+        # controlled, and on Windows scapy still holds the file handle when
+        # analyze_pcap_summary returns, so cleanup has to be best-effort.
+        with tempfile.NamedTemporaryFile(suffix=".pcap", delete=False) as handle:
+            handle.write(contents)
+            temp_pcap = Path(handle.name)
+        try:
+            from mcp_server.pcap_forensics import analyze_pcap_summary
+
+            pcap_summary = analyze_pcap_summary(str(temp_pcap))
+        except Exception as e:
+            pcap_summary = {"error": f"PCAP could not be parsed: {e}"}
+        finally:
+            try:
+                temp_pcap.unlink(missing_ok=True)
+            except OSError:
+                pass  # best effort; the file lives in the OS temp dir
+
+        if "error" in pcap_summary:
+            raise HTTPException(400, f"{filename}: {pcap_summary['error']}")
+
+        return {
+            "filename": filename,
+            "evidence_type": "pcap",
+            "features_extracted": None,
+            "forecast": None,
+            "forecast_unavailable_reason": (
+                "A PCAP yields packet-level evidence, not the "
+                f"{len(FEATURE_COLUMNS)} CICFlowMeter flow features the forecast "
+                "requires. The packet summary is reported instead of substituting a "
+                "synthetic flow vector. Extending analyze_pcap_summary to emit "
+                "per-flow aggregates is tracked in docs/plan/world-model-core.md "
+                "(D1, risk 6)."
+            ),
+            "pcap_summary": pcap_summary,
+        }
+
+    if not lowered.endswith(".csv"):
+        raise HTTPException(400, f"{filename}: expected a .csv, .pcap or .pcapng file.")
+
+    try:
+        df = pd.read_csv(io.BytesIO(contents))
+    except Exception as e:
+        raise HTTPException(400, f"{filename}: CSV could not be parsed: {e}")
+
+    if df.empty:
+        raise HTTPException(400, f"{filename}: the CSV contains no data rows.")
+
+    row = df.iloc[0]
+    by_lower = {str(c).lower(): c for c in df.columns}
+    features: dict[str, float] = {}
+    missing: list[str] = []
+    unparseable: list[str] = []
+    for col in FEATURE_COLUMNS:
+        source = col if col in df.columns else by_lower.get(col.lower())
+        if source is None:
+            missing.append(col)
+            continue
+        try:
+            features[col] = float(row[source])
+        except (TypeError, ValueError):
+            unparseable.append(col)
+
+    if missing:
+        shown = ", ".join(missing[:8]) + (", ..." if len(missing) > 8 else "")
+        raise HTTPException(
+            400,
+            f"{filename}: cannot analyse this file - {len(missing)} of "
+            f"{len(FEATURE_COLUMNS)} required flow features are absent ({shown}). "
+            "No forecast is produced and no values are substituted. Export "
+            "CICFlowMeter-style flow columns (see ml/flow_features.py).",
+        )
+    if unparseable:
+        shown = ", ".join(unparseable[:8]) + (", ..." if len(unparseable) > 8 else "")
+        raise HTTPException(400, f"{filename}: non-numeric or missing values in: {shown}.")
+
+    try:
+        forecast_result = forecast_infiltration(features, k_steps=k_steps)
+    except (FileNotFoundError, ImportError) as e:
+        raise HTTPException(503, f"Forecast engine unavailable: {e}")
+
+    return {
+        "filename": filename,
+        "evidence_type": "flow",
+        "features_extracted": len(features),
+        "forecast": forecast_result,
+    }
 
 
 # ---------------------------------------------------------------------------

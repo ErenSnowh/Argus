@@ -24,7 +24,11 @@ from collections import Counter
 from pathlib import Path
 
 # Suppress harmless Scapy runtime warnings when libpcap/Npcap is not installed
+import warnings
+logging.getLogger("scapy").setLevel(logging.ERROR)
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", category=UserWarning, module="scapy")
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="scapy")
 
 from scapy.layers.inet import IP, TCP, UDP
 from scapy.layers.dns import DNS, DNSQR

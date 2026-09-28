@@ -682,11 +682,14 @@ async def upload_file_endpoint(
                     "forward/backward packet and byte counts are split 50/50 "
                     "(a raw capture has no flow direction without reassembly)",
                     "down_up_ratio is fixed at 0.5 for the same reason",
-                    "retransmission_count is approximated by the RST flag count",
+                    "retransmission_count uses a within-window duplicate-"
+                    "sequence heuristic; RST packets are resets and are "
+                    "never counted as retransmissions",
                     "fwd/bwd header lengths are fixed at 20 bytes",
                     "topology counts are per-window, not cumulative host history",
                     "windows are equal-duration slices of the capture, not "
-                    "fixed 60 s bins (WP2 replaces this for the real pipeline)",
+                    "fixed 60 s bins - demo path only; the D1 pipeline uses "
+                    "scripts/pcap_stream_bins.py",
                 ],
             },
             "pcap_summary": pcap_summary,

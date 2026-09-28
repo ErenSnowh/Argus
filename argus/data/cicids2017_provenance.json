@@ -9,12 +9,12 @@
     "url": "https://huggingface.co/datasets/bvsam/cic-ids-2017/tree/70bac6246d99cf046186a02e1cce6883e2ffe7ea",
     "note": "parquet mirror of GeneratedLabelledFlows/TrafficLabelling; machine_learning/ and pcap/ were NOT used"
   },
-  "retrieved_utc": "2026-09-28T11:43:26+00:00",
+  "retrieved_utc": "2026-09-28T12:57:20+00:00",
   "raw_files_tracked_by_git": false,
-  "defects": [
+  "observed_anomalies": [
     {
       "file": "Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv.parquet",
-      "known_defect": "288602 rows are entirely empty (every column NaN). Upstream export artifact; they must be dropped before training and must never be zero-filled or imputed."
+      "observed_anomaly": "288,602 rows are entirely empty (every column NaN). Observed in this pinned Hugging Face Parquet snapshot (bvsam/cic-ids-2017 @ 70bac6246d99, traffic_labels/). Whether the canonical CIC-IDS-2017 export contains the same rows has not been established, so this is not asserted to be an upstream export defect. These rows must be dropped in preprocessing and must never be zero-filled or imputed."
     }
   ],
   "files": [
@@ -1189,7 +1189,7 @@
       "effective_rows": 170366,
       "label_nulls": 0,
       "label_blanks": 0,
-      "known_defect": "288602 rows are entirely empty (every column NaN). Upstream export artifact; they must be dropped before training and must never be zero-filled or imputed.",
+      "observed_anomaly": "288,602 rows are entirely empty (every column NaN). Observed in this pinned Hugging Face Parquet snapshot (bvsam/cic-ids-2017 @ 70bac6246d99, traffic_labels/). Whether the canonical CIC-IDS-2017 export contains the same rows has not been established, so this is not asserted to be an upstream export defect. These rows must be dropped in preprocessing and must never be zero-filled or imputed.",
       "label_histogram": {
         "BENIGN": 168186,
         "Web Attack \u0096 Brute Force": 1507,

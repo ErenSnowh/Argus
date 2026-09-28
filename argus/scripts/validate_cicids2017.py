@@ -42,6 +42,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Windows consoles default to cp1252, which cannot encode some dataset label
+# strings (e.g. the U+0096 byte in "Web Attack \u0096 ..."). Never let output
+# encoding crash the validator or lose the histogram.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
+
 HF_REPO = "bvsam/cic-ids-2017"
 HF_REVISION = "70bac6246d99cf046186a02e1cce6883e2ffe7ea"
 HF_URL = f"https://huggingface.co/datasets/{HF_REPO}/tree/{HF_REVISION}"
@@ -141,8 +147,8 @@ def validate_file(path: Path) -> tuple[dict, list[str]]:
     labels = df[label_col]
 
     # Two very different kinds of "no label":
-    #   * an entirely empty row - upstream export padding. Documented, dropped
-    #     before training, never zero-filled.
+    #   * an entirely empty row - padding observed in this pinned snapshot.
+    #     Documented, dropped before training, never zero-filled.
     #   * a populated row whose label is missing - a real data hole. Fatal.
     all_null_mask = df.isna().all(axis=1)
     all_null_rows = int(all_null_mask.sum())
@@ -160,10 +166,14 @@ def validate_file(path: Path) -> tuple[dict, list[str]]:
             f"{blanks} labels are blank"
         )
     if all_null_rows:
-        record["known_defect"] = (
-            f"{all_null_rows} rows are entirely empty (every column NaN). "
-            "Upstream export artifact; they must be dropped before training "
-            "and must never be zero-filled or imputed."
+        record["observed_anomaly"] = (
+            f"{all_null_rows:,} rows are entirely empty (every column NaN). "
+            "Observed in this pinned Hugging Face Parquet snapshot "
+            f"({HF_REPO} @ {HF_REVISION[:12]}, traffic_labels/). Whether the "
+            "canonical CIC-IDS-2017 export contains the same rows has not "
+            "been established, so this is not asserted to be an upstream "
+            "export defect. These rows must be dropped in preprocessing and "
+            "must never be zero-filled or imputed."
         )
 
     counts = labels.dropna().astype(str).str.strip().value_counts()
@@ -248,17 +258,17 @@ def main() -> int:
               f"hash_match={rec.get('hash_match')}")
         print(f"        labels={len(rec.get('label_histogram', {}))}  "
               f"ts {ts}  unparsable={rec.get('timestamp_unparsable')}")
-        if rec.get("known_defect"):
-            print(f"        DEFECT: {rec['known_defect']}")
+        if rec.get("observed_anomaly"):
+            print(f"        ANOMALY: {rec['observed_anomaly']}")
 
     schema_consistent = bool(schemas) and len(set(schemas)) == 1
     if not schema_consistent:
         problems.append("the 8 files do not share one schema")
 
     print("\n--- aggregate ---")
-    print(f"rows (as shipped)  {total_rows}")
-    print(f"all-null padding   {all_null_total}")
-    print(f"rows (effective)   {total_rows - all_null_total}")
+    print(f"rows (as shipped)  {total_rows:,}")
+    print(f"all-null padding   {all_null_total:,}")
+    print(f"rows (effective)   {total_rows - all_null_total:,}")
     print(f"schema consistent {schema_consistent} "
           f"({len(schemas[0]) if schemas else 0} columns)")
     print("label histogram:")
@@ -286,9 +296,9 @@ def main() -> int:
         },
         "retrieved_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "raw_files_tracked_by_git": False,
-        "defects": [
-            {"file": r["file"], "known_defect": r["known_defect"]}
-            for r in per_file if r.get("known_defect")
+        "observed_anomalies": [
+            {"file": r["file"], "observed_anomaly": r["observed_anomaly"]}
+            for r in per_file if r.get("observed_anomaly")
         ],
         "files": per_file,
         "totals": {
@@ -318,8 +328,9 @@ def main() -> int:
     print(f"\nPASS: hashes match revision {HF_REVISION}; schema, labels and "
           "timestamps are consistent.")
     if all_null_total:
-        print(f"NOTE: {all_null_total} all-null padding rows are recorded as a "
-              "known defect and must be dropped in preprocessing "
+        print(f"NOTE: {all_null_total:,} all-null padding rows are recorded as "
+              "observed in this pinned snapshot (not confirmed against the "
+              "canonical CIC export) and must be dropped in preprocessing "
               "(never zero-filled).")
     return 0
 

@@ -504,11 +504,22 @@ def generate_temporal_dataset_with_horizons(
 
 
 def extract_features_from_pcap(pcap_path: str, window_size: int = 10) -> np.ndarray:
-    """Extract world model features from a PCAP file.
+    """Extract world model features from a PCAP file - DEMO PATH ONLY.
 
-    Groups packets into temporal windows and computes flow-level + packet-level
-    features for each window. Returns a (n_windows, n_features) matrix suitable
-    for world model inference.
+    Groups packets into `window_size` equal-duration slices of the whole
+    capture and computes an approximate feature row for each. These windows
+    are NOT the fixed 60 s wall-clock bins of plan D1 and must never be
+    joined to them; the D1-keyed, streaming, fixed-bin extractor lives in
+    `ml/world_model/pcap_bins.py` (CLI: `scripts/pcap_stream_bins.py`).
+
+    Known limitations, each disclosed to API callers via `approximations`:
+      * the whole capture is loaded with `rdpcap` - fine for bounded demo
+        uploads, never for multi-GB captures;
+      * forward/backward counts are split 50/50 (no flow reassembly);
+      * retransmission_count is a within-window duplicate-sequence heuristic;
+        RST packets are resets and are never counted as retransmissions.
+
+    Returns a (n_windows, n_features) matrix suitable for world model inference.
     """
     from scapy.layers.inet import IP, TCP, UDP
     from scapy.utils import rdpcap
@@ -573,7 +584,36 @@ def extract_features_from_pcap(pcap_path: str, window_size: int = 10) -> np.ndar
         payload_sizes = [len(bytes(pkt[TCP].payload)) for pkt in w_pkts
                          if TCP in pkt and pkt[TCP].payload]
         frag_flags = sum(1 for pkt in w_pkts if IP in pkt and pkt[IP].flags & 0x01)
-        retrans = sum(1 for pkt in w_pkts if TCP in pkt and pkt[TCP].flags & 0x04)
+        # Retransmission heuristic: a TCP segment whose sequence number lies
+        # before the highest end-sequence already seen for that 5-tuple
+        # direction in this window (TCP serial arithmetic). RST packets are
+        # resets, not retransmissions - the old implementation counted the
+        # RST flag here and mislabelled every reset as a retransmission -
+        # and pure ACKs (length 0) are not counted either. Approximation:
+        # no stream reassembly across windows; disclosed to API callers.
+        retrans = 0
+        seq_end: dict[tuple, int] = {}
+        for pkt in w_pkts:
+            if TCP not in pkt or IP not in pkt:
+                continue
+            tcp = pkt[TCP]
+            if int(tcp.flags) & 0x04:  # RST: a reset, never a retransmission
+                continue
+            length = (
+                len(bytes(tcp.payload))
+                + bool(int(tcp.flags) & 0x02)  # SYN consumes a sequence number
+                + bool(int(tcp.flags) & 0x01)  # FIN consumes a sequence number
+            )
+            if not length:
+                continue  # pure ACK
+            key = (pkt[IP].src, pkt[IP].dst, tcp.sport, tcp.dport)
+            seq = int(tcp.seq)
+            prev = seq_end.get(key)
+            if prev is not None and ((seq - prev) & 0xFFFFFFFF) >= 0x80000000:
+                retrans += 1  # seq strictly before the highest end seen
+            end = (seq + length) & 0xFFFFFFFF
+            if prev is None or ((end - prev) & 0xFFFFFFFF) < 0x80000000:
+                seq_end[key] = end
 
         # Inter-arrival times
         w_timestamps = sorted([float(pkt.time) for pkt in w_pkts if hasattr(pkt, "time")])

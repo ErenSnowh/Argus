@@ -1,11 +1,12 @@
 # Review bundle - D1/D2/D3 + label-map, packet-tier extractor
 
 Branch `review/d1-d2-d3-packet-tier` (code commit `b36148c`, bundle commit
-`a61ed27`) against `main` (`c53652f`). Prepared 2026-09-28.
+`a61ed27`, round-1 fixes `e107158`) against `main` (`c53652f`). Prepared
+2026-09-28.
 
 **Review round 1 is folded in.** The findings of the first review round are
 fixed in the same three files and are described item by item in **item 8**;
-the `.diff` artifacts here were regenerated from the working tree, so they
+the `.diff` artifacts here were regenerated against `main`, so they
 already contain those fixes. WP2/training not started; no PCAPs downloaded;
 `main` untouched - merge only on approval.
 
@@ -21,8 +22,8 @@ already contain those fixes. WP2/training not started; no PCAPs downloaded;
 Regenerate with:
 
 ```
-# round-1 fixes are uncommitted working-tree changes, so diff against main
-# with two dots (three dots would compare only committed history):
+# two dots against main: picks up every commit on this branch plus any
+# uncommitted fix on top of it (three dots would compare commits only):
 git diff main -- docs/plan/world-model-core.md
 git diff main -- argus/ml/world_model/pcap_bins.py argus/scripts/pcap_stream_bins.py
 git diff main -- argus/tests/test_pcap_bins.py

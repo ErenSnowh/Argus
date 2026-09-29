@@ -682,9 +682,12 @@ async def upload_file_endpoint(
                     "forward/backward packet and byte counts are split 50/50 "
                     "(a raw capture has no flow direction without reassembly)",
                     "down_up_ratio is fixed at 0.5 for the same reason",
-                    "retransmission_count uses a within-window duplicate-"
-                    "sequence heuristic; RST packets are resets and are "
-                    "never counted as retransmissions",
+                    "retransmission_count is a sequence-regression proxy "
+                    "(demo path only; counts reordered segments too): a "
+                    "segment below the highest sequence end seen in the "
+                    "window counts, so honest reordering is counted here and "
+                    "not by the streaming extractor. RST packets are resets "
+                    "and are never counted",
                     "fwd/bwd header lengths are fixed at 20 bytes",
                     "topology counts are per-window, not cumulative host history",
                     "windows are equal-duration slices of the capture, not "

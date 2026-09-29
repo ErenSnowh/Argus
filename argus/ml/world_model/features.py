@@ -516,8 +516,11 @@ def extract_features_from_pcap(pcap_path: str, window_size: int = 10) -> np.ndar
       * the whole capture is loaded with `rdpcap` - fine for bounded demo
         uploads, never for multi-GB captures;
       * forward/backward counts are split 50/50 (no flow reassembly);
-      * retransmission_count is a within-window duplicate-sequence heuristic;
-        RST packets are resets and are never counted as retransmissions.
+      * retransmission_count is a within-window sequence-regression proxy
+        (demo path only; counts reordered segments too). RST packets are resets
+        and are never counted, and pure ACKs are never counted either. The
+        streaming extractor instead counts duplicate byte ranges, so it scores
+        an honest reorder as 0 where this heuristic scores it 1.
 
     Returns a (n_windows, n_features) matrix suitable for world model inference.
     """
@@ -584,13 +587,18 @@ def extract_features_from_pcap(pcap_path: str, window_size: int = 10) -> np.ndar
         payload_sizes = [len(bytes(pkt[TCP].payload)) for pkt in w_pkts
                          if TCP in pkt and pkt[TCP].payload]
         frag_flags = sum(1 for pkt in w_pkts if IP in pkt and pkt[IP].flags & 0x01)
-        # Retransmission heuristic: a TCP segment whose sequence number lies
+        # retransmission_count is a sequence-regression proxy (demo path only;
+        # counts reordered segments too): a segment whose sequence number lies
         # before the highest end-sequence already seen for that 5-tuple
-        # direction in this window (TCP serial arithmetic). RST packets are
-        # resets, not retransmissions - the old implementation counted the
-        # RST flag here and mislabelled every reset as a retransmission -
-        # and pure ACKs (length 0) are not counted either. Approximation:
-        # no stream reassembly across windows; disclosed to API callers.
+        # direction in this window counts, so an honest reorder - seq 1000,
+        # 1020, then 1010 - counts here even though no byte range was sent
+        # twice. The streaming extractor (ml/world_model/pcap_bins.py) keeps
+        # the observed ranges and counts that reorder as 0; this path cannot,
+        # because it only remembers a single high-water mark. RST packets are
+        # resets, not retransmissions - the old implementation counted the RST
+        # flag here and mislabelled every reset as a retransmission - and pure
+        # ACKs (length 0) are not counted either. Approximation: no stream
+        # reassembly across windows; disclosed to API callers.
         retrans = 0
         seq_end: dict[tuple, int] = {}
         for pkt in w_pkts:

@@ -328,15 +328,16 @@ class _BinAccumulator:
 
     All per-quantity state is O(1) online accumulators plus one bounded
     per-direction sequence-range set (at most :data:`SEQ_RANGES_CAP` merged
-    ranges per directional 5-tuple) needed by the sequence-regression
-    detector. No per-packet lists are retained.
+    ranges per directional 5-tuple) feeding the duplicate-range counter
+    (``dup_range_count``, emitted under the column ``retransmission_count``).
+    No per-packet lists are retained.
     """
 
     __slots__ = (
         "src_ip", "bin_start", "packet_count", "byte_count",
         "first_pkt_ts", "last_pkt_ts", "_ttl", "_window",
-        "_payload", "frag_count", "seq_regression_count",
-        "seq_ranges_capped", "_ranges",
+        "_payload", "frag_count", "dup_range_count", "seq_ranges_capped",
+        "_ranges",
     )
 
     def __init__(self, src_ip: str, bin_start: int) -> None:
@@ -350,26 +351,26 @@ class _BinAccumulator:
         self._window = _OnlineStats()
         self._payload = _OnlineStats()
         self.frag_count = 0
-        # the column PACKET_LEVEL_COLUMNS calls "retransmission_count" - see
-        # FEATURE_SEMANTICS: this counts duplicate byte ranges, not
-        # retransmissions, and is never presented as one.
-        self.seq_regression_count = 0
+        # named for what it counts (byte ranges seen twice on this direction),
+        # not for the column PACKET_LEVEL_COLUMNS calls it - see
+        # FEATURE_SEMANTICS: it is never presented as a retransmission count
+        self.dup_range_count = 0
         self.seq_ranges_capped = 0
         # directional 5-tuple -> merged observed (start, end) sequence ranges
         self._ranges: dict[FiveTuple, list[list[int]]] = {}
 
     def _observe_tcp(self, tcp: Any, key: FiveTuple) -> None:
-        """Sequence-regression check: was this segment's range seen before?
+        """Duplicate-range check: was this segment's byte range seen before?
 
-        A regression is a **duplicate byte range** on this directional
-        5-tuple: the whole [seq, seq+len) interval was already observed in
-        this bin. Deliberately NOT counted:
+        What :attr:`dup_range_count` counts is a **duplicate byte range** on
+        this directional 5-tuple: the whole [seq, seq+len) interval was already
+        observed in this bin. Deliberately NOT counted:
 
         * RST segments (resets carry no data of interest);
         * pure ACKs (zero sequence space);
         * in-window reordering - a segment that arrives *before* earlier data
           and the earlier data arriving afterwards are two distinct ranges, so
-          seq 1000, 1020, then 1010 is zero regressions (the old
+          seq 1000, 1020, then 1010 is zero duplicates (the old
           "seq < highest end seen" rule called that one retransmission).
         """
         if int(tcp.flags) & 0x04:  # RST: a reset, never a regression
@@ -385,7 +386,7 @@ class _BinAccumulator:
         end = (seq + length) & 0xFFFFFFFF
         ranges = self._ranges.setdefault(key, [])
         if _range_covered(ranges, seq, end):
-            self.seq_regression_count += 1
+            self.dup_range_count += 1
             return
         if _range_insert(ranges, seq, end) > SEQ_RANGES_CAP:
             # bounded memory beats perfect recall: drop the oldest ranges and
@@ -439,8 +440,8 @@ class _BinAccumulator:
                 "payload_size_mean": pay_mean,
                 "payload_size_std": pay_std,
                 # column name kept for PACKET_LEVEL_COLUMNS compatibility;
-                # this is a sequence-regression count - see FEATURE_SEMANTICS
-                "retransmission_count": float(self.seq_regression_count),
+                # dup_range_count is the honest name - see FEATURE_SEMANTICS
+                "retransmission_count": float(self.dup_range_count),
             },
         }
 

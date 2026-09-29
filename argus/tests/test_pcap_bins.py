@@ -127,6 +127,40 @@ def test_demo_extractor_no_longer_counts_rst_as_retrans(tmp_path):
     assert feats[0, idx] == pytest.approx(1.0)
 
 
+def test_demo_path_is_a_sequence_regression_proxy_and_says_so(tmp_path):
+    """seq 1000, 1020, 1010: the demo path counts 1, the extractor counts 0.
+
+    The demo heuristic keeps only a high-water mark per direction, so it cannot
+    tell a retransmission from an honest reorder. Counting the reorder is
+    accepted - what is not acceptable is describing the column as if it did
+    not, so both surfaces that characterise it must use the proxy wording.
+    """
+    from ml.world_model.features import (
+        WORLD_MODEL_FEATURES,
+        extract_features_from_pcap,
+    )
+
+    idx = WORLD_MODEL_FEATURES.index("retransmission_count")
+    p = tmp_path / "reorder.pcap"
+    pkts = []
+    for seq in (1000, 1020, 1010):  # no byte range is ever sent twice
+        pkt = _tcp("10.0.0.1", "10.0.0.2", 44000, 80, seq=seq)
+        pkt.time = BASE + 0.1  # identical times -> a single window
+        pkts.append(pkt)
+    wrpcap(str(p), pkts)
+
+    assert extract_features_from_pcap(str(p))[0, idx] == pytest.approx(1.0)
+    streaming = extract_pcap_bins(p, bin_seconds=BIN)
+    assert streaming["records"][0]["features"]["retransmission_count"] == 0.0
+
+    features_src = (ROOT / "ml" / "world_model" / "features.py").read_text(
+        encoding="utf-8")
+    app_src = (ROOT / "dashboard" / "app.py").read_text(encoding="utf-8")
+    for src in (features_src, app_src):
+        assert "sequence-regression proxy" in src
+        assert "counts reordered segments too" in src
+
+
 # --------------------------------------------------------------------------
 # no zero-fill: uncovered flow bins stay null + flagged
 # --------------------------------------------------------------------------

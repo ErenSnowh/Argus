@@ -30,7 +30,7 @@
 
 ### D1 - A state S_t is one source host aggregated over one 60 s bin
 
-**Decision.** Entity = source host (`Source IP`); bin = a fixed 60 s wall-clock window; S_t = the aggregate of every flow that host emitted inside the bin. Bin edges are fixed to the wall clock: `bin_start = floor(unix_seconds / 60) × 60` (UTC) and the bin key is `(src_ip, bin_start)`; flow timestamps in this snapshot are second-precision, so the floor is lossless. The packet tier (amended D2) keys its bins with the identical formula, so flow and PCAP bins join without re-binning. Per-bin features: the 24 `FLOW_FEATURE_COLUMNS` (`features.py:33-58`) and 6 `EXTENDED_FLOW_COLUMNS` (`:61-68`), aggregated with `sum` for counters (`*_packets`, `*_bytes`, `*_flag_count`, `unique_dst_ports_per_src`) and `mean` + `std` for durations, lengths, IATs, rates and ratios; the 8 `TOPOLOGY_FEATURE_COLUMNS` (`:85-94`) computed from the bin's real `dst_ip`, `dst_port` and `timestamp` columns (`src_fanout`, `dst_fanin`, `unique_dst_hosts`, `unique_src_hosts`, and `new_host_edges` / `cross_subnet_edges` / `new_dst_ports` measured against every prior bin of that host, `connection_repetition`); plus `n_flows`. The 8 `PACKET_LEVEL_COLUMNS` (`:71-80`) are **not part of the flow-tier schema (v2) and are never zero-filled into it**; they arrive, if at all, through the packet tier of the amended D2, joined on the identical `(src_ip, bin_start)` key as **NaN with a coverage flag wherever the PCAP does not cover the bin**. Schema v2 = 24 + 6 + 8 topology + `n_flows` = **39 columns**, stored in the checkpoint as an ordered `feature_list`.
+**Decision.** Entity = source host (`Source IP`); bin = a fixed 60 s wall-clock window; S_t = the aggregate of every flow that host emitted inside the bin. Bin edges are fixed to the wall clock: `bin_start = floor(unix_seconds / 60) × 60` (UTC) and the bin key is `(src_ip, bin_start)`. Monday's `Timestamp` is second-precision; Tuesday-Friday are minute-precision (`d/m/Y H:M`, see `cicids2017_provenance.json`). Flow-side binning is exact by construction on both; the PCAP-side offset uses the quantization-aware feasible interval (D2 round-2 amendment). The packet tier (amended D2) keys its bins with the identical formula, so flow and PCAP bins join without re-binning. Per-bin features: the 24 `FLOW_FEATURE_COLUMNS` (`features.py:33-58`) and 6 `EXTENDED_FLOW_COLUMNS` (`:61-68`), aggregated with `sum` for counters (`*_packets`, `*_bytes`, `*_flag_count`) and `mean` + `std` for durations, lengths, IATs, rates and ratios; `unique_dst_ports` = nunique(Destination Port) over the bin's flows (CICFlowMeter exports carry no per-flow distinct-port column, so it is computed per bin from `Destination Port` and never summed - `FLOW_FEATURE_COLUMNS` freezes its name as `unique_dst_ports_per_src`); `src_fanout` = nunique(Destination IP); the 8 `TOPOLOGY_FEATURE_COLUMNS` (`:85-94`) computed from the bin's real `dst_ip`, `dst_port` and `timestamp` columns (`src_fanout`, `dst_fanin`, `unique_dst_hosts`, `unique_src_hosts`, and `new_host_edges` / `cross_subnet_edges` / `new_dst_ports` measured against every prior bin of that host, `connection_repetition`); plus `n_flows`. The 8 `PACKET_LEVEL_COLUMNS` (`:71-80`) are **not part of the flow-tier schema (v2) and are never zero-filled into it**; they arrive, if at all, through the packet tier of the amended D2, joined on the identical `(src_ip, bin_start)` key as **NaN with a coverage flag wherever the PCAP does not cover the bin**. Schema v2 = 24 + 6 + 8 topology + `n_flows` = **39 columns**, stored in the checkpoint as an ordered `feature_list`.
 
 **Rationale.** `P(S_{t+1} | S_t)` only means something if S_t is the state of a persisting entity. V2 windows interleaved flows from every host on the network, which is a per-flow classifier in disguise and cannot express "this host is advancing through the kill chain". Host-plus-time binning makes the prediction target concrete ("the attacker's next stage, for this host, in k minutes"), turns `attack_within_k` into a genuine temporal target, and is the only formulation under which `train_test_split_by_day` (`dataset_loader.py:353`) becomes usable at all. 60 s because the CIC-IDS-2017 attacks are minutes-scale (patator bursts about 2 min, DoS Hulk about 1 h) while CICFlowMeter expires a flow after 120 s idle / 600 s active, so one bin holds a coherent burst; 60 s also yields at least two bins per short attack, the minimum for a k-step rollout to say anything. 30 s is carried as a reported sensitivity check, not as the headline.
 
@@ -72,6 +72,9 @@ Pitfalls the script asserts rather than assumes: `Infinity` and NaN in `Flow Byt
 If the raw files cannot be downloaded in-session, **the human supplies them and I wait**. `data/sample_datasets/*` are 30-row fixtures produced by `scripts/generate_sample_datasets.py`; they will not stand in for real telemetry, and no number derived from them will reach the README. The second dataset is CTU-13 (`.binetflow`, per-scenario botnet timelines) and only after CIC-IDS-2017 has produced a number.
 ### D3 - Two evaluation protocols, three baselines, an honest lead time
 
+P-B is scored on the binary `attack_within_k` target only - each stage is
+day-specific, so a held-out day's stage is unseen in training.
+
 **P-A (in-distribution forecast).** Per day, chronological split at the 70 % time
 mark: train on the earlier bins, test on the later bins, and no window may
 straddle the split point.
@@ -79,6 +82,11 @@ straddle the split point.
 **P-B (out-of-distribution / unseen attack).** Leave-one-day-out over
 Tuesday, Wednesday, Thursday and Friday. Monday is all-benign and is used for
 training only.
+
+**Stage vocabulary.** The stage head is trained and scored on the 6 observed
+stages (BENIGN, PortScan, WebAttack, BruteForce, Botnet, DDoS). Exfiltration does
+not occur in CIC-IDS-2017; Infiltration (36 flows) and Heartbleed (11) enter the
+binary target only and are listed with their support.
 
 **Baselines.** Logistic regression on x_t only (the PS-mandated baseline),
 random forest on x_t only, and logistic regression on the lagged window
@@ -88,6 +96,19 @@ Transformer cannot beat the lagged LR, the README says so.
 **Metrics** per k in {1, 2, 4}: macro-F1, per-stage F1 together with its support
 count, benign FPR, ROC-AUC and PR-AUC for `attack_within_h{k}`, and ECE with 10
 bins.
+
+**tau and lead time.** tau is chosen on a validation slice that never touches
+test bins - P-A: the last 15 % by time of each day's training portion; P-B: one
+training day held out in rotation - and the benign-FPR printed beside lead time
+is the TEST-set FPR at that tau. Lead time is reported with its onset count n
+(expected 12-15: attacker 172.16.0.1 plus the bot-infected 192.168.10.x hosts).
+Per-victim (dst-host) view: **rejected** - D1's state is keyed by the *emitting*
+host, so a dst-host series is a second state definition and a second benchmark,
+not a slice of this one, and at n = 12-15 attacker-side onsets a per-victim cell
+would be a median over a single onset. The victim side is not lost: `dst_fanin`,
+`unique_dst_hosts` and `src_fanout` are computed from the bin's real `dst_ip`,
+and every onset row records its dst_ip, so a dst-keyed view can be reconstructed
+from the results JSON without a second schema.
 
 **Lead time, redefined.** For each ground-truth onset (the first non-BENIGN bin
 of a host after at least 5 BENIGN bins), lead = onset time minus the time of the
@@ -182,7 +203,34 @@ rows_after_clean}]`, `rows_raw_total`, `rows_after_clean_total`,
 `bins`, `label_histogram_per_day`, `sequences_per_horizon`, `feature_list`, and
 `code{git_sha, utc_timestamp, prepare_script_sha256}`.
 
+**Manifest sanity anchors, checked at ±3 %.** The manifest additionally carries
+`label_anchors[{family, expected, observed, deviation_pct, within_tolerance}]`
+and `label_anchor_violations` (must be empty), and `prepare_cicids2017.py --check`
+fails on any family outside tolerance rather than writing a manifest a later
+stage will trust. Anchors are the published CIC family counts -
+BENIGN ≈ 2.27 M, DoS Hulk ≈ 231 k, PortScan ≈ 159 k, DDoS ≈ 128 k,
+GoldenEye ≈ 10.3 k, FTP-Patator ≈ 7.9 k, SSH-Patator ≈ 5.9 k, slowloris ≈ 5.8 k,
+Slowhttptest ≈ 5.5 k, Bot ≈ 2.0 k, Web BF ≈ 1.5 k, XSS ≈ 650, Infiltration 36,
+SQLi 21, Heartbleed 11 - compared against the **raw** label histogram, before the
+map below merges the four DoS families into DDoS and the Web-Attack families into
+BruteForce / WebAttack, because the anchors name CIC families, not stages. The
+three exact-count anchors (Infiltration 36, SQLi 21, Heartbleed 11) are compared
+exactly: ±3 % of 11 flows is less than one flow. Measured against this pinned
+snapshot (`cicids2017_provenance.json`, `totals.label_histogram`), every anchor is
+inside ±3 % today - largest deviation Bot, 1,966 against 2.0 k = -1.7 % - so the
+check passes as of writing; it exists to catch a wrong variant, a truncated
+download or a silently merged label, not to re-derive the dataset.
+
 Exact CIC-IDS-2017 to 8-stage map, starting from `dataset_loader.py:626-645`:
+
+**Two rows of this map are superseded by D3's stage vocabulary.** D3 says the stage
+head is trained and scored on the **6 observed stages** and that Infiltration
+(36 flows) and Heartbleed (11) enter the **binary** target only; the two rows
+below map Infiltration -> LateralMovement (a 7th class the data cannot train) and
+Heartbleed -> WebAttack (which would put 11 flows into a stage class). Both cannot
+hold, and D3's wording is the constraint, so WP2 keeps the *rationale* of those two
+rows for provenance and for the binary label, and excludes the two families from
+`y_stage_*` - they never become stage-head classes with 11 or 36 samples.
 
 | Raw label | Stage | Keep / change, and why |
 |---|---|---|
@@ -316,12 +364,13 @@ horizon head receives targets must not be softened to make the CPU budget pass;
    below 24 h; on failure, fall back to CICFlowMeter row order and mark those
    days "row-order split (timestamp ambiguous)" in the manifest and the results
    JSON.
-6. **PS §1 asks for packet-level features.** Resolved in D2 (two-tier model):
-   the servable schema stays flow-tier; packet-tier features come from PCAPs
-   joined as NaN-with-coverage on the same 60 s bins and are reported only as
-   a scoped ablation with measured clock offset and coverage. A Thursday-only
-   PCAP is a pilot, not benchmark coverage; full five-day PCAP coverage
-   (52.43 GB) is a separate approval. WP1.5's upload response still never
+6. **PS §1 asks for packet-level features.** Mitigation designed (two-tier
+   model); resolved only when a PCAP source is approved and the `packet_tier` arm
+   has run. The design is D2's: the servable schema stays flow-tier; packet-tier
+   features come from PCAPs joined as NaN-with-coverage on the same 60 s bins and
+   are reported only as a scoped ablation with measured clock offset and coverage.
+   A Thursday-only PCAP is a pilot, not benchmark coverage; full five-day PCAP
+   coverage (52.43 GB) is a separate approval. WP1.5's upload response still never
    invents a feature vector.
 7. **New dependencies.** Parquet needs `pyarrow`; the CPU torch wheel is around
    200 MB. Both go into `requirements.txt`, and the Dockerfile must pin the CPU

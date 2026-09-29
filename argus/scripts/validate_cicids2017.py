@@ -22,7 +22,11 @@ Checks performed per file:
     4. label column found; null / blank label count must be 0
     5. label histogram recorded (whitespace-normalised)
     6. timestamp column parsed; min / max / unparsable count recorded
-    7. across all 8 files: schema is identical, label set is consistent
+    7. timestamp PRECISION measured (distinct second values + any sub-second
+       component), per file - D1's binning and D2's offset interval both depend
+       on whether a table can express seconds, and that is measured, never
+       assumed from the file name or from the CIC documentation
+    8. across all 8 files: schema is identical, label set is consistent
 
 Raw parquet stays out of git (argus/.gitignore: data/raw/). What is tracked
 is this script and the JSON record it writes.
@@ -51,6 +55,10 @@ if hasattr(sys.stdout, "reconfigure"):
 HF_REPO = "bvsam/cic-ids-2017"
 HF_REVISION = "70bac6246d99cf046186a02e1cce6883e2ffe7ea"
 HF_URL = f"https://huggingface.co/datasets/{HF_REPO}/tree/{HF_REVISION}"
+# When the 8 files were actually fetched - a fact about the data, not about the
+# last time this script ran, so it is pinned rather than datetime.now(). A
+# refresh of the record says so under "record_refreshed_utc".
+RETRIEVED_UTC = "2026-09-28T12:57:20+00:00"
 
 # LFS object ids (sha256 of file content) as reported by the Hugging Face API
 # for the revision above. Filenames are preserved exactly as in traffic_labels/.
@@ -104,6 +112,52 @@ def parse_timestamps(series):
         parsed = pd.to_datetime(series, errors="coerce", dayfirst=True)
     failures = int(parsed.isna().sum())
     return parsed, failures
+
+
+def measure_timestamp_precision(parsed) -> dict:
+    """Measure what the Timestamp column can actually express.
+
+    The claim to be settled is not "CIC says the format is X" but "these values
+    have seconds in them or they do not", because D1's 60 s floor is exact on
+    either while D2's clock-offset interval is bounded by whatever the flow
+    table's own step is. Measured from the values, never from the file name.
+    """
+    import pandas as pd  # noqa: F401  (already imported by the caller)
+
+    valid = parsed.dropna()
+    out = {
+        "timestamp_rows": int(len(valid)),
+        "distinct_seconds": 0,
+        "seconds_min": None,
+        "seconds_max": None,
+        "rows_with_nonzero_seconds": 0,
+        "rows_with_subsecond": 0,
+        "quantization_sec": None,
+        "basis": None,
+    }
+    if not len(valid):
+        return out
+    seconds = valid.dt.second
+    subsecond = valid.dt.microsecond + valid.dt.nanosecond
+    distinct = sorted(set(int(s) for s in seconds))
+    out["distinct_seconds"] = len(distinct)
+    out["seconds_min"] = distinct[0]
+    out["seconds_max"] = distinct[-1]
+    out["rows_with_nonzero_seconds"] = int((seconds != 0).sum())
+    out["rows_with_subsecond"] = int((subsecond != 0).sum())
+    if out["rows_with_subsecond"]:
+        out["quantization_sec"] = 0.001
+        out["basis"] = "at least one value carries a sub-second component"
+    elif out["rows_with_nonzero_seconds"]:
+        out["quantization_sec"] = 1.0
+        out["basis"] = ("seconds span "
+                        f"{out['seconds_min']}..{out['seconds_max']} "
+                        f"({out['distinct_seconds']} distinct values); "
+                        "no sub-second component anywhere")
+    else:
+        out["quantization_sec"] = 60.0
+        out["basis"] = "seconds are 0 on every row, so the column is minute-precision"
+    return out
 
 
 def validate_file(path: Path) -> tuple[dict, list[str]]:
@@ -199,6 +253,7 @@ def validate_file(path: Path) -> tuple[dict, list[str]]:
             parsed.max().isoformat() if not parsed.isna().all() else None
         )
         record["timestamp_unparsable"] = failures
+        record.update(measure_timestamp_precision(parsed))
         if parsed.isna().all():
             problems.append(f"{path.name}: every timestamp is unparsable")
 
@@ -280,7 +335,21 @@ def main() -> int:
                     if r.get("timestamp_min")), default=None),
         "max": max((r.get("timestamp_max") for r in per_file
                     if r.get("timestamp_max")), default=None),
+        "quantization_sec": {r["file"]: r.get("quantization_sec")
+                             for r in per_file},
+        "quantization_basis": {r["file"]: r.get("basis")
+                               for r in per_file},
     }
+    minute_only = sorted(r["file"] for r in per_file
+                         if r.get("quantization_sec") == 60.0)
+    second_or_finer = sorted(r["file"] for r in per_file
+                             if (r.get("quantization_sec") or 0) < 60.0)
+    quant_map = {r["file"]: r.get("quantization_sec") for r in per_file}
+    print("timestamp precision (measured from the values):")
+    for name in sorted(quant_map):
+        print(f"    {quant_map[name]!s:>6} s  {name}")
+    print(f"    minute-precision: {len(minute_only)} file(s); "
+          f"second-precision or finer: {len(second_or_finer)} file(s)")
 
     record = {
         "dataset": "CIC-IDS-2017",
@@ -294,7 +363,9 @@ def main() -> int:
             "note": "parquet mirror of GeneratedLabelledFlows/TrafficLabelling; "
                     "machine_learning/ and pcap/ were NOT used",
         },
-        "retrieved_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "retrieved_utc": RETRIEVED_UTC,
+        "record_refreshed_utc": datetime.now(
+            timezone.utc).isoformat(timespec="seconds"),
         "raw_files_tracked_by_git": False,
         "observed_anomalies": [
             {"file": r["file"], "observed_anomaly": r["observed_anomaly"]}

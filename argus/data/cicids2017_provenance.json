@@ -10,6 +10,7 @@
     "note": "parquet mirror of GeneratedLabelledFlows/TrafficLabelling; machine_learning/ and pcap/ were NOT used"
   },
   "retrieved_utc": "2026-09-28T12:57:20+00:00",
+  "record_refreshed_utc": "2026-09-29T19:59:15+00:00",
   "raw_files_tracked_by_git": false,
   "observed_anomalies": [
     {
@@ -213,7 +214,15 @@
       "timestamp_column": "'Timestamp'",
       "timestamp_min": "2017-07-07T18:30:00",
       "timestamp_max": "2017-07-07T20:02:00",
-      "timestamp_unparsable": 0
+      "timestamp_unparsable": 0,
+      "timestamp_rows": 225745,
+      "distinct_seconds": 1,
+      "seconds_min": 0,
+      "seconds_max": 0,
+      "rows_with_nonzero_seconds": 0,
+      "rows_with_subsecond": 0,
+      "quantization_sec": 60.0,
+      "basis": "seconds are 0 on every row, so the column is minute-precision"
     },
     {
       "file": "Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv.parquet",
@@ -410,7 +419,15 @@
       "timestamp_column": "'Timestamp'",
       "timestamp_min": "2017-07-07T16:00:00",
       "timestamp_max": "2017-07-07T18:29:00",
-      "timestamp_unparsable": 0
+      "timestamp_unparsable": 0,
+      "timestamp_rows": 286467,
+      "distinct_seconds": 1,
+      "seconds_min": 0,
+      "seconds_max": 0,
+      "rows_with_nonzero_seconds": 0,
+      "rows_with_subsecond": 0,
+      "quantization_sec": 60.0,
+      "basis": "seconds are 0 on every row, so the column is minute-precision"
     },
     {
       "file": "Friday-WorkingHours-Morning.pcap_ISCX.csv.parquet",
@@ -607,7 +624,15 @@
       "timestamp_column": "'Timestamp'",
       "timestamp_min": "2017-07-07T11:59:00",
       "timestamp_max": "2017-07-07T15:59:00",
-      "timestamp_unparsable": 0
+      "timestamp_unparsable": 0,
+      "timestamp_rows": 191033,
+      "distinct_seconds": 1,
+      "seconds_min": 0,
+      "seconds_max": 0,
+      "rows_with_nonzero_seconds": 0,
+      "rows_with_subsecond": 0,
+      "quantization_sec": 60.0,
+      "basis": "seconds are 0 on every row, so the column is minute-precision"
     },
     {
       "file": "Monday-WorkingHours.pcap_ISCX.csv.parquet",
@@ -803,7 +828,15 @@
       "timestamp_column": "'Timestamp'",
       "timestamp_min": "2017-07-03T11:55:58",
       "timestamp_max": "2017-07-03T20:01:34",
-      "timestamp_unparsable": 0
+      "timestamp_unparsable": 0,
+      "timestamp_rows": 529918,
+      "distinct_seconds": 60,
+      "seconds_min": 0,
+      "seconds_max": 59,
+      "rows_with_nonzero_seconds": 522220,
+      "rows_with_subsecond": 0,
+      "quantization_sec": 1.0,
+      "basis": "seconds span 0..59 (60 distinct values); no sub-second component anywhere"
     },
     {
       "file": "Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv.parquet",
@@ -1000,7 +1033,15 @@
       "timestamp_column": "'Timestamp'",
       "timestamp_min": "2017-07-06T16:00:00",
       "timestamp_max": "2017-07-06T20:04:00",
-      "timestamp_unparsable": 0
+      "timestamp_unparsable": 0,
+      "timestamp_rows": 288602,
+      "distinct_seconds": 1,
+      "seconds_min": 0,
+      "seconds_max": 0,
+      "rows_with_nonzero_seconds": 0,
+      "rows_with_subsecond": 0,
+      "quantization_sec": 60.0,
+      "basis": "seconds are 0 on every row, so the column is minute-precision"
     },
     {
       "file": "Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv.parquet",
@@ -1200,7 +1241,15 @@
       "timestamp_column": "'Timestamp'",
       "timestamp_min": "2017-07-06T11:59:00",
       "timestamp_max": "2017-07-06T15:59:00",
-      "timestamp_unparsable": 0
+      "timestamp_unparsable": 0,
+      "timestamp_rows": 170366,
+      "distinct_seconds": 1,
+      "seconds_min": 0,
+      "seconds_max": 0,
+      "rows_with_nonzero_seconds": 0,
+      "rows_with_subsecond": 0,
+      "quantization_sec": 60.0,
+      "basis": "seconds are 0 on every row, so the column is minute-precision"
     },
     {
       "file": "Tuesday-WorkingHours.pcap_ISCX.csv.parquet",
@@ -1398,7 +1447,15 @@
       "timestamp_column": "'Timestamp'",
       "timestamp_min": "2017-07-04T11:53:00",
       "timestamp_max": "2017-07-04T20:00:00",
-      "timestamp_unparsable": 0
+      "timestamp_unparsable": 0,
+      "timestamp_rows": 445909,
+      "distinct_seconds": 1,
+      "seconds_min": 0,
+      "seconds_max": 0,
+      "rows_with_nonzero_seconds": 0,
+      "rows_with_subsecond": 0,
+      "quantization_sec": 60.0,
+      "basis": "seconds are 0 on every row, so the column is minute-precision"
     },
     {
       "file": "Wednesday-workingHours.pcap_ISCX.csv.parquet",
@@ -1599,7 +1656,15 @@
       "timestamp_column": "'Timestamp'",
       "timestamp_min": "2017-07-05T11:42:00",
       "timestamp_max": "2017-07-05T20:10:00",
-      "timestamp_unparsable": 0
+      "timestamp_unparsable": 0,
+      "timestamp_rows": 692703,
+      "distinct_seconds": 1,
+      "seconds_min": 0,
+      "seconds_max": 0,
+      "rows_with_nonzero_seconds": 0,
+      "rows_with_subsecond": 0,
+      "quantization_sec": 60.0,
+      "basis": "seconds are 0 on every row, so the column is minute-precision"
     }
   ],
   "totals": {
@@ -1715,7 +1780,27 @@
     },
     "timestamps": {
       "min": "2017-07-03T11:55:58",
-      "max": "2017-07-07T20:02:00"
+      "max": "2017-07-07T20:02:00",
+      "quantization_sec": {
+        "Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv.parquet": 60.0,
+        "Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv.parquet": 60.0,
+        "Friday-WorkingHours-Morning.pcap_ISCX.csv.parquet": 60.0,
+        "Monday-WorkingHours.pcap_ISCX.csv.parquet": 1.0,
+        "Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv.parquet": 60.0,
+        "Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv.parquet": 60.0,
+        "Tuesday-WorkingHours.pcap_ISCX.csv.parquet": 60.0,
+        "Wednesday-workingHours.pcap_ISCX.csv.parquet": 60.0
+      },
+      "quantization_basis": {
+        "Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv.parquet": "seconds are 0 on every row, so the column is minute-precision",
+        "Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv.parquet": "seconds are 0 on every row, so the column is minute-precision",
+        "Friday-WorkingHours-Morning.pcap_ISCX.csv.parquet": "seconds are 0 on every row, so the column is minute-precision",
+        "Monday-WorkingHours.pcap_ISCX.csv.parquet": "seconds span 0..59 (60 distinct values); no sub-second component anywhere",
+        "Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv.parquet": "seconds are 0 on every row, so the column is minute-precision",
+        "Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv.parquet": "seconds are 0 on every row, so the column is minute-precision",
+        "Tuesday-WorkingHours.pcap_ISCX.csv.parquet": "seconds are 0 on every row, so the column is minute-precision",
+        "Wednesday-workingHours.pcap_ISCX.csv.parquet": "seconds are 0 on every row, so the column is minute-precision"
+      }
     }
   },
   "checks_passed": true,

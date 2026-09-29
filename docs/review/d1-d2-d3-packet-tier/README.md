@@ -3,14 +3,16 @@
 Branch `review/d1-d2-d3-packet-tier`, in order: `b36148c` (code), `a61ed27`
 (bundle), `e107158` (round-1 fixes), `505b0b2` (hash note), `f812408` (round 2),
 `21b6fd1` (merge of `origin/main`), `496821c` + `1bebbd0` + `f267565` +
-`158c0c2` (round 3), `c4d81d4` (this bundle refreshed for rounds 2 and 3). A
-commit cannot list its own hash, so the authority for "what is on the branch" is
+`158c0c2` (round 3), `c4d81d4` (bundle refreshed for rounds 2 and 3), `c72de6e`
+(item 1 of round 4: plan card E). A commit cannot list its own hash, so the
+authority for "what is on the branch" is
 `git log --oneline main..HEAD` - review the branch tip. Base `main` =
 `c53652f`, with `origin/main` `eda53c4` merged in; that merge touches none of the
 files under review. Prepared 2026-09-28, extended 2026-09-29.
 
-**Review rounds 1, 2 and 3 are folded in.** Round 1's findings are described
-item by item in **item 8**, round 2's in **item 9**, round 3's in **item 10**;
+**Review rounds 1, 2, 3 and 4 are folded in.** Round 1's findings are described
+item by item in **item 8**, round 2's in **item 9**, round 3's in **item 10**,
+round 4's below (**item 11**);
 the `.diff` artifacts were regenerated against `main`, so they already contain
 every fix. WP2/training not started; no PCAPs downloaded; `main` untouched -
 merge only on approval.
@@ -19,7 +21,7 @@ merge only on approval.
 
 | File | What it is |
 |---|---|
-| `plan-world-model-core.diff` | the complete plan diff: D1, D2, D3, label map, risk 6 |
+| `plan-world-model-core.diff` | the complete plan diff: D1, D2, D3 (stage vocabulary, tau/lead time, packet-tier arm), 2.2 manifest anchors, label map, risk 6 - 8 hunks |
 | `extractor-pcap_bins-and-pcap_stream_bins.diff` | exact diff of the extractor (2 new files) |
 | `tests-test_pcap_bins.diff` | exact diff of the tests (1 new file) |
 | `consumers-features-and-dashboard.diff` | exact diff of the two demo-path consumers (`features.py`, `dashboard/app.py`) that disclose what `retransmission_count` really is (round 3) |
@@ -38,15 +40,18 @@ git diff main -- argus/ml/world_model/features.py argus/dashboard/app.py
 
 (`--output=<file>` rather than `>`, so the bytes stay git's own.)
 
-## 1. Changed plan sections (all 5 hunks in `plan-world-model-core.diff`)
+## 1. Changed plan sections (all 8 hunks in `plan-world-model-core.diff`)
 
 | Hunk | Section | Change |
 |---|---|---|
-| `@@ -30,11 +30,11 @@` | **D1** Decision + Rejected alternatives | bin key pinned as `bin_start = floor(unix_seconds / 60) * 60` (UTC), key `(src_ip, bin_start)`; the 8 packet columns are now "**not part of the flow-tier schema (v2) and are never zero-filled into it**; they arrive, if at all, through the packet tier of the amended D2"; rejected-alt (b) rewritten to name the gated 52.43 GB set and the NaN-with-coverage-flag rule |
-| `@@ -44,7 +44,30 @@` | **D2** | four additions (+ the round-1, round-2 and round-3 paragraphs and the round-3 re-smoke): (i) *acquisition status* - 8 Parquet files from the pinned HF mirror `bvsam/cic-ids-2017 @ 70bac624`, validated by `scripts/validate_cicids2017.py`, 288,602 all-null padding rows observed-not-asserted, dropped never zero-filled; (ii) *flow vs. packet features - conflict resolution*: two-tier model (see item 6); (iii) *PCAP source decision*: options (a) Thursday-only / (b) stream-and-cut <= 2 GB / (c) baseline-only, with the three gates that hold under any option (streaming fixed-60 s extractor, measured clock offset, measured coverage; until measured on real CIC PCAPs they are "not yet measured"); (iv) *extractor implementation status*: what is implemented and green today; (v) round-2 amendment - bounded reordering and the feasible-interval offset; (vi) round-3 amendment - fail-closed late packets, the majority-window interval, `dup_range_count`; (vii) the round-3 re-smoke and the round-1 line it supersedes |
-| `@@ -80,6 +103,8 @@` | **D3** | *packet-tier arm*: only if a PCAP source is approved, one extra arm restricted to PCAP-covered bins, labelled `packet_tier`, provenance carries `pcap_file`, `clock_offset_sec`, `bins_flow_total`, `bins_covered`, `attack_bins_covered`; uncovered bins excluded (NaN, never zero-filled); one Thursday PCAP = at most a Thursday-scoped `pilot` row; flow-tier arm stays the headline |
-| `@@ -172,7 +197,7 @@` | **label map** | the mojibake row is no longer hypothetical: measured over all 8 files, every Web-Attack row spells all three families `Web Attack \u0096 ...` (U+0096) - none use ASCII hyphen or U+FFFD; `_CICIDS2017_LABEL_MAP` lacks that spelling, so today every such row falls through `.get(x, "BENIGN")` at `dataset_loader.py:691` (V12, confirmed live); new entries map Brute Force -> BruteForce, XSS/Sql Injection -> WebAttack; unknown labels now **raise** with `unmapped_labels: []` required in the manifest |
-| `@@ -291,12 +316,13 @@` | **Risks** | item 6 "PS 1 asks for packet-level features" rewritten from open risk to **Resolved in D2 (two-tier model)** - see item 6 below |
+| `@@ -30,11 +30,11 @@` | **D1** Decision + Rejected alternatives | bin key pinned as `bin_start = floor(unix_seconds / 60) * 60` (UTC), key `(src_ip, bin_start)`; the 8 packet columns are now "**not part of the flow-tier schema (v2) and are never zero-filled into it**; they arrive, if at all, through the packet tier of the amended D2"; rejected-alt (b) rewritten to name the gated 52.43 GB set and the NaN-with-coverage-flag rule; **round 4** - `unique_dst_ports_per_src` leaves the `sum` list (a per-bin nunique of `Destination Port` cannot be summed: the line now says nunique over the bin's flows, computed from `Destination Port`, and freezes the name), and the timestamp claim is **measured, not assumed** - Monday is second-precision, Tuesday-Friday minute-precision (`cicids2017_provenance.json`) - so "the floor is lossless" is replaced by the quantization-aware feasible-interval rule on the PCAP side |
+| `@@ -44,11 +44,37 @@` | **D2** | four additions (+ the round-1, round-2 and round-3 paragraphs and the round-3 re-smoke): (i) *acquisition status* - 8 Parquet files from the pinned HF mirror `bvsam/cic-ids-2017 @ 70bac624`, validated by `scripts/validate_cicids2017.py`, 288,602 all-null padding rows observed-not-asserted, dropped never zero-filled; (ii) *flow vs. packet features - conflict resolution*: two-tier model (see item 6); (iii) *PCAP source decision*: options (a) Thursday-only / (b) stream-and-cut <= 2 GB / (c) baseline-only, with the three gates that hold under any option (streaming fixed-60 s extractor, measured clock offset, measured coverage; until measured on real CIC PCAPs they are "not yet measured"); (iv) *extractor implementation status*: what is implemented and green today; (v) round-2 amendment - bounded reordering and the feasible-interval offset; (vi) round-3 amendment - fail-closed late packets, the majority-window interval, `dup_range_count`; (vii) the round-3 re-smoke and the round-1 line it supersedes |
+| `@@ -57,6 +83,11 @@` | **D3 - stage vocabulary** (new) | the stage head is trained and scored on the **6 observed stages** (BENIGN, PortScan, WebAttack, BruteForce, Botnet, DDoS); Exfiltration does not occur in CIC-IDS-2017; Infiltration (36 flows) and Heartbleed (11) enter the **binary target only** with their support listed - so no stage class is trained on 11 or 36 samples |
+| `@@ -66,6 +97,19 @@` | **D3 - tau and lead time** (new) | tau is chosen on a **validation slice that never touches test bins** (P-A: last 15 % by time of each day's training portion; P-B: one training day held out in rotation), the benign-FPR printed beside lead time is the **test-set** FPR at that tau, lead time is reported with its onset count n (expected 12-15: attacker 172.16.0.1 plus bot-infected 192.168.10.x hosts), and the **per-victim (dst-host) view is rejected** - a second state definition and a second benchmark, and at n = 12-15 a per-victim cell is a median over one onset - with the victim side still reconstructable from `dst_fanin` / `unique_dst_hosts` / `src_fanout` and the `dst_ip` on every onset row |
+| `@@ -80,6 +124,8 @@` | **D3** | *packet-tier arm*: only if a PCAP source is approved, one extra arm restricted to PCAP-covered bins, labelled `packet_tier`, provenance carries `pcap_file`, `clock_offset_sec`, `bins_flow_total`, `bins_covered`, `attack_bins_covered`; uncovered bins excluded (NaN, never zero-filled); one Thursday PCAP = at most a Thursday-scoped `pilot` row; flow-tier arm stays the headline |
+| `@@ -157,8 +203,35 @@` | **2.2 manifest + label-map preamble** (new) | the manifest additionally carries `label_anchors[{family, expected, observed, deviation_pct, within_tolerance}]` and `label_anchor_violations` (must be empty), and `prepare_cicids2017.py --check` fails on any family outside **±3 %** (exact for the 36 / 21 / 11-flow families, where ±3 % is under one flow) - a guard against a wrong column or a silently truncated file, never a substitute for the pinned revision + SHA-256 + byte size; checked against this pinned snapshot **every anchor passes today**, largest deviation Bot 1,966 vs 2.0 k = -1.7 %. Then: **two rows of the label map are superseded** by D3's stage vocabulary (Infiltration -> LateralMovement would be a 7th class the data cannot train; Heartbleed -> WebAttack would put 11 flows in a stage class) - WP2 keeps their rationale for provenance and the binary label and excludes both families from `y_stage_*` |
+| `@@ -172,7 +245,7 @@` | **label map** | the mojibake row is no longer hypothetical: measured over all 8 files, every Web-Attack row spells all three families `Web Attack \u0096 ...` (U+0096) - none use ASCII hyphen or U+FFFD; `_CICIDS2017_LABEL_MAP` lacks that spelling, so today every such row falls through `.get(x, "BENIGN")` at `dataset_loader.py:691` (V12, confirmed live); new entries map Brute Force -> BruteForce, XSS/Sql Injection -> WebAttack; unknown labels now **raise** with `unmapped_labels: []` required in the manifest |
+| `@@ -291,12 +364,14 @@` | **Risks** | Risk 6 "PS 1 asks for packet-level features" is **not** declared resolved - it now reads "**Mitigation designed** (two-tier model); **resolved only when** a PCAP source is approved and the `packet_tier` arm has run", and keeps the pilot-vs-coverage and 52.43 GB-separate-approval statements. Round 3 called this "Resolved in D2"; that was ahead of the evidence, since no PCAP has been measured - see item 6 |
 
 ## 2. Exact code and test diffs
 
@@ -60,7 +65,7 @@ Verification run on 2026-09-29 (round 3): `pytest argus/tests/test_pcap_bins.py`
 
 ## 3. Timestamp-to-epoch conversion code
 
-`argus/scripts/pcap_stream_bins.py:96-173` (`load_flow_rows`) - round-1 version,
+`argus/scripts/pcap_stream_bins.py:123-211` (`load_flow_rows`) - round-1 version,
 the null accounting is the addition, the epoch maths is unchanged apart from the
 single-pass index map:
 
@@ -123,7 +128,7 @@ Notes:
 * **The `"nan"` string bug**: the old `str(r[col] or "")` turned a float NaN
   into the literal string `"nan"` (NaN is truthy), which then polluted join
   keys and labels. Every cell now goes through `_cell_str`
-  (`pcap_stream_bins.py:70-83`), which maps `None`/NaN/NA/empty/`"nan"`/
+  (`pcap_stream_bins.py:97-111`), which maps `None`/NaN/NA/empty/`"nan"`/
   `"none"`/`"nat"` to `None`, and a row without a real IP or port is dropped
   and counted in `rows_dropped_missing_identity` instead of being joined on a
   fabricated key. Pinned by
@@ -145,21 +150,22 @@ Notes:
   `astype("int64") / 1e9` is seconds. Guarded by
   `test_load_flow_rows_epoch_not_corrupted_by_pandas_unit`.
 
-## 4. Why a "+2 s planted" fixture measured +1.220 s
+## 4. Why the round-1 median read +1.220 s for a +2.000 s plant, and what is applied now
 
-**Sign convention.** `measure_clock_offset` (`pcap_bins.py:455-662`) computes,
+**Sign convention.** `measure_clock_offset` (`pcap_bins.py:891-1196`) computes,
 for every protocol-aware directional 5-tuple present in both sources - paired
 **per connection instance**, not per tuple - the delta
 
 ```
-offset = flow_ts - first_packet_ts      (median over matched pairs)
+offset = flow_ts - first_packet_ts      (one delta per matched pair)
 ```
 
 A **positive** offset means the flow-table clock reads *later* than the PCAP
 clock (flow timestamps are shifted into the future relative to packets). The
 PCAP is what gets corrected: `--apply-offset` adds `apply.correction_sec` (the
-median, and only when the guard declares it eligible) to packet timestamps
-before binning, aligning the PCAP onto the flow-table clock. The
+midpoint of the feasible interval, and only when the interval is narrow enough
+to be applied) to packet timestamps before binning, aligning the PCAP onto the
+flow-table clock. The
 plan defines the sign the same way (D2: "flow timestamp minus first packet
 time").
 
@@ -206,11 +212,6 @@ microsecond table       (q_flow=0.001s, q_packet=0.001s)
   coverage  : 1/1 flow bins (100.0%), attack 1/1 (100.0%)
 ```
 
-Measured == predicted to 6 decimals, so the number is fully explained: the
-0.780 s gap is the **sub-second component of the PCAP clock that
-second-precision flow timestamps cannot represent**, not a clock-offset
-estimation error.
-
 **What rounds 2 and 3 changed about this number.** Under the round-1 rule
 ("apply the median while the IQR looks small") this fixture *applied* +1.220 s,
 and that correction was 0.78 s away from the planted truth - the IQR was small
@@ -226,22 +227,19 @@ actually express the sub-second - pins the interval to 0.002 s, and its midpoint
 allow. Nothing was tuned to make that happen: one binary, two tables, different
 evidence, different decisions - and the refusal is the honest one.
 
-**Expected tolerance.** For a plant of `+P` seconds written second-precision,
-any correct measurement must satisfy `measured ∈ (P-1, P]` (frac lies in
-`[0,1)`), specifically `[P - max_frac, P - min_frac]` for a given capture:
-here `[1.197, 1.249]`, IQR bounded by the frac span (0.052 s). The output carries
-`observed_delta.dispersion_iqr_sec`, `observed_delta.consistent_min_sec` /
-`consistent_max_sec` and `observed_delta.feasible_interval.width_sec`, so a
-reviewer can check the band without rerunning anything. Outside `(-inf, P]`
-would indicate a sign or unit bug - the pandas `[us]` bug drove the measured
-delta to about -1.78e9 s (flow epoch 1000x too small minus real PCAP seconds;
-flagged by the regression test); a whole hours-sized offset would indicate a
-timezone-labelled flow clock (reported, never silently corrected).
+Two magnitude signatures the measurement reports instead of hiding: the pandas
+`[us]` epoch regression, which would drive a delta to about -1.78e9 s (item 3,
+pinned by `test_load_flow_rows_epoch_not_corrupted_by_pandas_unit`), and a
+whole-hour magnitude, which is flagged `timezone_scale` and reported, never
+silently corrected.
 
-## 5. Is the streaming 60 s host-keyed path actually wired into the pipeline?
+## 5. The streaming 60 s host-keyed path: a standalone extractor, not consumed by any training or benchmark code (pinned by `test_packet_tier_has_no_training_or_benchmark_consumer_yet`)
 
-It is wired as the **D2-designated extraction entry point**, with honest
-boundaries about what does not exist yet:
+It is the **D2-designated extraction entry point**, and a *standalone* one -
+extraction and measurement end to end, with no training or benchmark consumer:
+that boundary is a test, not a comment (`test_packet_tier_has_no_training_or_benchmark_consumer_yet`
+walks the tree and fails if any file but the CLI and these tests imports
+`pcap_bins`), and honest boundaries about what does not exist yet:
 
 **Wired:**
 
@@ -253,9 +251,9 @@ boundaries about what does not exist yet:
    * flow side - `load_flow_tables` / `load_flow_rows` parse each table's
      `Timestamp` into unix seconds, then `main()` computes
      `flow_keys = [(r["src"], bin_start_for(r["ts"], args.bin_seconds))]`
-     (`pcap_stream_bins.py:309-310`);
+     (`pcap_stream_bins.py:380-381`);
    * PCAP side - `extract_pcap_bins` keys every packet
-     `key = (ip.src, bin_start_for(ts, bin_seconds))` (`pcap_bins.py:380`);
+     `key = (ip.src, bin_start_for(ts, bin_seconds))` (`pcap_bins.py:567`);
      `bin_start_for = floor(ts / bin_seconds) * bin_seconds`.
    * D1's own plan text now states the same formula (`world-model-core.md`
      D1 Decision amendment), so the contract is written down, not implied.
@@ -266,10 +264,11 @@ boundaries about what does not exist yet:
    (overall + attack) are computed by `measure_bin_coverage` and written into
    the output JSON - the exact fields the D3 `packet_tier` arm's provenance
    requires.
-4. Cross-references put every consumer on this path:
-   `features.py:511-513` (the demo extractor docstring says the D1-keyed
+4. Cross-references point the *demo* path at this path, so no demo artifact can
+   be mistaken for the pipeline's:
+   `features.py:510-513` (the demo extractor docstring says the D1-keyed
    extractor *is* `ml/world_model/pcap_bins.py`, CLI `scripts/pcap_stream_bins.py`);
-   `dashboard/app.py:690-692` (API disclosure names the same CLI); the plan
+   `dashboard/app.py:693-695` (API disclosure names the same CLI); the plan
    D2/D3 amendments name the same files.
 5. Guardrails travel with the path: `PcapReader` (never `rdpcap`) is enforced
    by `test_extractor_streams_with_pcapreader_never_rdpcap`; a packet that
@@ -311,8 +310,12 @@ So D1's decision ("packet columns are **not part of** the flow-tier schema")
 and D2's decision ("packet columns arrive through the packet tier, joined as
 NaN + coverage flag") are two halves of one rule: *the servable model never
 carries packet features; packet features exist only as a PCAP-joined,
-coverage-scoped analysis arm*. Risk 6 was rewritten from "open risk" to
-"Resolved in D2 (two-tier model)" to record this.
+coverage-scoped analysis arm*. Risk 6 records that design, not a resolution: it
+reads "Mitigation designed (two-tier model); resolved only when a PCAP source is
+approved and the `packet_tier` arm has run", because until a real CIC PCAP has
+been measured the packet tier exists only as a design - the same fact the
+Status section states from the code side ("Real CIC PCAP clock offset and bin
+coverage: not yet measured").
 
 ## 7. Can one Thursday PCAP support the planned multi-day evaluation?
 
@@ -396,6 +399,21 @@ What rounds 2 and 3 did *not* change: the D1 bin key, the two-tier model (item 6
 the no-zero-fill rule, the Thursday-pilot limits (item 7), the frozen column
 names, and the D2 gates - real CIC PCAP offset and coverage are still **not yet
 measured**.
+
+## 11. Review round 4 - what each finding changed
+
+| Finding | Fix | Where |
+|---|---|---|
+| D1 aggregated `unique_dst_ports_per_src` with `sum`, but a per-bin nunique of `Destination Port` cannot be summed | the aggregation sentence now says nunique over the bin's flows, computed from `Destination Port`, never summed; the frozen name stays | plan D1, hunk `@@ -30,11 +30,11 @@` |
+| D1 asserted minute-precision timestamps as if that applied to every day - true Tuesday-Friday, **false for Monday** - and built "the floor is lossless" on that claim | precision is **measured, not asserted**: `validate_cicids2017.py::measure_timestamp_precision` derives each file's step from its own values and writes `quantization_sec` + `basis` into `cicids2017_provenance.json` (Monday **1.0 s**, Tuesday-Friday **60.0 s**); the plan states both and swaps the lossless-floor claim for the quantization-aware feasible-interval rule on the PCAP side | plan D1; `argus/scripts/validate_cicids2017.py`; `argus/data/cicids2017_provenance.json` |
+| `retrieved_utc` was `datetime.now()`, so refreshing the provenance record claimed a new retrieval | pinned constant, commented as a recorded fact | same validator |
+| D3 never said what the stage head may be trained on, while the label map sent Infiltration -> LateralMovement and Heartbleed -> WebAttack (a 7th class; an 11-sample class) | **Stage vocabulary**: 6 observed stages; the two small families enter the **binary** target only with their support; the two label-map rows are declared superseded, their rationale kept for provenance | plan D3 + label-map preamble |
+| tau had no defined selection slice, the FPR beside lead time was ambiguous, lead time had no onset count, and a per-victim view was implied | **tau and lead time**: tau from a validation slice that never touches test bins, test-set FPR at that tau labelled as such, onset count n (12-15) reported; **per-victim (dst-host) view rejected** with reasons and a reconstruction path from the results JSON | plan D3 |
+| the manifest had no independent sanity check on the dataset it describes | `label_anchors` + `label_anchor_violations: []` checked at **±3 %** by `prepare_cicids2017.py --check` (exact for the 36/21/11 families), measured against this snapshot - all pass, worst Bot -1.7 %; explicitly a guard, never a substitute for revision+SHA+size pinning | plan 2.2 |
+| Risk 6 was written as **resolved** while nothing had been measured on a PCAP | "**Mitigation designed** (two-tier model); **resolved only when** a PCAP source is approved and the `packet_tier` arm has run" | plan Risks; item 6 above |
+| item 4 was titled as if the +1.220 s were a mystery about the planted offset, and argued from "measured == predicted" and a `(P-1, P]` tolerance band - the wrong criterion, since that band passes the very number round 1 wrongly applied | retitled to what happened (the round-1 **median** read +1.220 s for a +2.000 s truth) and **both paragraphs deleted**; the sign/unit-bug facts the deleted paragraph carried are kept, in the place they belong | item 4 above |
+| item 5 asked "is the streaming path *wired into the pipeline*?", which over-sold it | retitled to what a test actually pins: **a standalone extractor, not consumed by any training or benchmark code** (`test_packet_tier_has_no_training_or_benchmark_consumer_yet`), and the "consumer" bullet now says plainly that the cross-references point the *demo* path here | item 5 above |
+| every `file:line` reference and hunk header in this bundle had drifted as the files grew | re-derived from this tip: `pcap_bins.py:567` / `:891-1196`, `pcap_stream_bins.py:97-111` / `:123-211` / `:380-381`, `features.py:510-513`, `dashboard/app.py:693-695`, and all 8 hunk headers in item 1; the `.diff` artifacts regenerated with `git diff --output=` | throughout |
 
 ## Status of this bundle
 

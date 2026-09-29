@@ -1,10 +1,13 @@
 # Review bundle - D1/D2/D3 + label-map, packet-tier extractor
 
-Branch `review/d1-d2-d3-packet-tier` (code commit `b36148c`, bundle commit
-`a61ed27`, round-1 fixes `e107158`, round-2 baseline `f812408`, round-3 fixes
-`496821c` + `1bebbd0` + `f267565` + `158c0c2`) against `main` (`c53652f`;
-`origin/main` `eda53c4` is merged in - it touches none of the files under
-review). Prepared 2026-09-28, extended 2026-09-29.
+Branch `review/d1-d2-d3-packet-tier`, in order: `b36148c` (code), `a61ed27`
+(bundle), `e107158` (round-1 fixes), `505b0b2` (hash note), `f812408` (round 2),
+`21b6fd1` (merge of `origin/main`), `496821c` + `1bebbd0` + `f267565` +
+`158c0c2` (round 3), `c4d81d4` (this bundle refreshed for rounds 2 and 3). A
+commit cannot list its own hash, so the authority for "what is on the branch" is
+`git log --oneline main..HEAD` - review the branch tip. Base `main` =
+`c53652f`, with `origin/main` `eda53c4` merged in; that merge touches none of the
+files under review. Prepared 2026-09-28, extended 2026-09-29.
 
 **Review rounds 1, 2 and 3 are folded in.** Round 1's findings are described
 item by item in **item 8**, round 2's in **item 9**, round 3's in **item 10**;

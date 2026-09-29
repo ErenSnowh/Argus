@@ -1,9 +1,9 @@
 diff --git a/argus/tests/test_pcap_bins.py b/argus/tests/test_pcap_bins.py
 new file mode 100644
-index 0000000..f50d554
+index 0000000..06c3490
 --- /dev/null
 +++ b/argus/tests/test_pcap_bins.py
-@@ -0,0 +1,264 @@
+@@ -0,0 +1,680 @@
 +"""
 +test_pcap_bins.py
 +-----------------
@@ -15,6 +15,7 @@ index 0000000..f50d554
 +"""
 +from __future__ import annotations
 +
++import json
 +import sys
 +from pathlib import Path
 +
@@ -23,11 +24,12 @@ index 0000000..f50d554
 +ROOT = Path(__file__).resolve().parent.parent
 +sys.path.insert(0, str(ROOT))
 +
-+from scapy.layers.inet import IP, TCP, UDP
-+from scapy.packet import Raw
-+from scapy.utils import wrpcap
++from scapy.layers.inet import IP, TCP, UDP  # noqa: E402
++from scapy.packet import Raw  # noqa: E402
++from scapy.utils import wrpcap  # noqa: E402
 +
-+from ml.world_model.pcap_bins import (
++from ml.world_model.pcap_bins import (  # noqa: E402
++    BackwardsTimestampError,
 +    bin_start_for,
 +    extract_pcap_bins,
 +    join_packet_features,
@@ -243,9 +245,8 @@ index 0000000..f50d554
 +# --------------------------------------------------------------------------
 +# flow-table timestamps: pandas unit drift (us vs ns) must not corrupt epochs
 +# --------------------------------------------------------------------------
-+def test_load_flow_rows_epoch_not_corrupted_by_pandas_unit(tmp_path):
-+    """pandas 3 parses to datetime64[us]; the old /1e9 gave ~1e3x-too-small
-+    epochs, which silently destroyed clock-offset and coverage joins."""
++def _load_cli():
++    """Load the CLI script as a module (scripts/ is not an importable pkg)."""
 +    import importlib.util
 +
 +    spec = importlib.util.spec_from_file_location(
@@ -253,7 +254,13 @@ index 0000000..f50d554
 +        ROOT / "scripts" / "pcap_stream_bins.py")
 +    mod = importlib.util.module_from_spec(spec)
 +    spec.loader.exec_module(mod)
++    return mod
 +
++
++def test_load_flow_rows_epoch_not_corrupted_by_pandas_unit(tmp_path):
++    """pandas 3 parses to datetime64[us]; the old /1e9 gave ~1e3x-too-small
++    epochs, which silently destroyed clock-offset and coverage joins."""
++    mod = _load_cli()
 +    csv_path = tmp_path / "flows.csv"
 +    csv_path.write_text(
 +        "Source IP,Destination IP,Source Port,Destination Port,Timestamp,"
@@ -266,5 +273,414 @@ index 0000000..f50d554
 +    # ~2026 epoch: far above 1e7 (the value a unit bug produces) and far
 +    # below 1e16 (the value a missing /1e9 produces)
 +    assert 1.7e9 < rows[0]["ts"] < 2.2e9
++
++
++# --------------------------------------------------------------------------
++# backwards timestamps: fail closed by default, counted merge on request
++# --------------------------------------------------------------------------
++def _backwards_pcap(tmp_path, name="backwards.pcap"):
++    """Two bins, then a packet belonging to the bin already closed."""
++    p = tmp_path / name
++    pkts = []
++    for ts in (BASE + 10.0, BASE + 120.0, BASE + 20.0):
++        pkt = IP(src="10.0.0.1", dst="10.0.0.9") / UDP(sport=1, dport=2)
++        pkt.time = ts
++        pkts.append(pkt)
++    wrpcap(str(p), pkts)
++    return p
++
++
++def test_backwards_packet_fails_closed_by_default(tmp_path):
++    p = _backwards_pcap(tmp_path)
++    with pytest.raises(BackwardsTimestampError) as exc:
++        extract_pcap_bins(p, bin_seconds=BIN)
++    # the error must say how to opt into reordering - never drop silently
++    assert "on_backwards='merge'" in str(exc.value)
++
++
++def test_backwards_merge_keeps_and_counts_the_packet(tmp_path):
++    p = _backwards_pcap(tmp_path, "merge.pcap")
++    result = extract_pcap_bins(p, bin_seconds=BIN, on_backwards="merge")
++    keys = [(r["src_ip"], r["bin_start"]) for r in result["records"]]
++    assert len(keys) == len(set(keys))  # exactly one record per key
++    by_key = {(r["src_ip"], r["bin_start"]): r for r in result["records"]}
++    assert by_key[("10.0.0.1", BASE)]["packet_count"] == 2  # late one kept
++    assert by_key[("10.0.0.1", BASE + 120)]["packet_count"] == 1
++    assert result["stats"]["backwards_packets_merged"] == 1
++    assert result["stats"]["non_monotonic_steps"] == 1
++
++
++def test_reorder_grace_keeps_a_recent_bin_open_without_failing(tmp_path):
++    p = _backwards_pcap(tmp_path, "grace.pcap")
++    # 90 s grace: bin BASE is still open when the late packet arrives, so the
++    # default fail policy never triggers and nothing needs merging.
++    result = extract_pcap_bins(p, bin_seconds=BIN, reorder_grace_sec=90.0)
++    by_key = {(r["src_ip"], r["bin_start"]): r for r in result["records"]}
++    assert by_key[("10.0.0.1", BASE)]["packet_count"] == 2
++    assert result["stats"]["backwards_packets_merged"] == 0
++    assert result["stats"]["reorder_grace_sec"] == 90.0
++
++
++def test_invalid_backwards_policy_and_grace_are_rejected(tmp_path):
++    p = _backwards_pcap(tmp_path, "invalid.pcap")
++    with pytest.raises(ValueError):
++        extract_pcap_bins(p, bin_seconds=BIN, on_backwards="ignore")
++    with pytest.raises(ValueError):
++        extract_pcap_bins(p, bin_seconds=BIN, reorder_grace_sec=-1.0)
++
++
++def test_unsupported_or_null_names_only_null_statistics(tmp_path):
++    from ml.world_model.pcap_bins import unsupported_or_null
++
++    p = tmp_path / "udp-only.pcap"
++    pkt = IP(src="10.0.0.1", dst="10.0.0.9") / UDP(sport=1, dport=2)
++    pkt.time = BASE + 10
++    wrpcap(str(p), [pkt])
++    record = extract_pcap_bins(p, bin_seconds=BIN)["records"][0]
++    assert unsupported_or_null(record) == [
++        "tcp_window_mean", "tcp_window_std"]
++
++
++# --------------------------------------------------------------------------
++# watermark: bins close on boundary crossings, not once per packet
++# --------------------------------------------------------------------------
++def test_watermark_scans_scale_with_bins_not_packets(tmp_path):
++    p = tmp_path / "many.pcap"
++    pkts = []
++    for i in range(600):  # 10 bins x 60 packets, same emitting host
++        pkt = IP(src="10.0.0.1", dst="10.0.0.9") / UDP(sport=1, dport=2)
++        pkt.time = BASE + i
++        pkts.append(pkt)
++    wrpcap(str(p), pkts)
++
++    result = extract_pcap_bins(p, bin_seconds=BIN)
++    stats = result["stats"]
++    assert stats["packets_considered"] == 600
++    assert len(result["records"]) == 10
++    assert stats["watermark_scans"] <= 11  # boundary crossings, not 600
++    assert sum(r["packet_count"] for r in result["records"]) == 600
++
++
++# --------------------------------------------------------------------------
++# clock offset: observed delta vs guarded apply decision
++# --------------------------------------------------------------------------
++def _offset_pcap(tmp_path, n=4, name="offset.pcap", pkt_ts=BASE + 10.0):
++    """``n`` distinct TCP connections, each first packet at ``pkt_ts``."""
++    p = tmp_path / name
++    pkts = []
++    for i in range(n):
++        pkt = _tcp("10.0.0.1", "10.0.0.2", 44000 + i, 80, seq=1)
++        pkt.time = pkt_ts
++        pkts.append(pkt)
++    wrpcap(str(p), pkts)
++    return p
++
++
++def _offset_flows(deltas):
++    """Flow rows starting ``deltas[i]`` after the matching packet."""
++    return [{"src": "10.0.0.1", "dst": "10.0.0.2", "sport": 44000 + i,
++             "dport": 80, "proto": "tcp", "ts": BASE + 10.0 + d}
++            for i, d in enumerate(deltas)]
++
++
++def test_offset_applied_only_when_measured_and_unambiguous(tmp_path):
++    p = _offset_pcap(tmp_path, n=4)
++    off = measure_clock_offset(p, _offset_flows([7.0] * 4))
++    assert off["status"] == "measured"
++    assert off["apply"]["eligible"] is True
++    assert off["apply"]["correction_sec"] == pytest.approx(7.0)
++    assert off["observed_delta"]["n_matched_pairs"] == 4
++
++
++def test_offset_apply_refused_when_too_few_matches(tmp_path):
++    p = _offset_pcap(tmp_path, n=2)
++    off = measure_clock_offset(p, _offset_flows([7.0] * 2))
++    assert off["median_sec"] == pytest.approx(7.0)   # still reported ...
++    assert off["apply"]["eligible"] is False
++    assert off["apply"]["correction_sec"] is None    # ... never applied as 0
++    assert "too few" in off["apply"]["reason"]
++    assert "too_few_matches" in off["apply"]["flags"]
++
++
++def test_offset_apply_refused_on_ambiguous_dispersion(tmp_path):
++    p = _offset_pcap(tmp_path, n=5)
++    off = measure_clock_offset(p, _offset_flows([0.0, 0.1, 6.0, 6.1, 12.0]))
++    assert off["observed_delta"]["dispersion_iqr_sec"] > 1.0
++    assert off["apply"]["eligible"] is False
++    assert "ambiguous" in off["apply"]["reason"]
++    assert "ambiguous_dispersion" in off["apply"]["flags"]
++
++
++def test_offset_flags_timezone_scale_without_correcting_it(tmp_path):
++    p = _offset_pcap(tmp_path, n=3)
++    off = measure_clock_offset(p, _offset_flows([3600.0] * 3))
++    assert off["median_sec"] == pytest.approx(3600.0)
++    assert "timezone_scale" in off["apply"]["flags"]
++
++
++def test_offset_matching_is_protocol_aware(tmp_path):
++    """A UDP packet must never pair with a TCP flow row on equal ports."""
++    p = tmp_path / "proto.pcap"
++    pkt = IP(src="10.0.0.1", dst="10.0.0.2") / UDP(sport=44000, dport=80)
++    pkt.time = BASE + 10.0
++    wrpcap(str(p), [pkt])
++    off = measure_clock_offset(p, _offset_flows([7.0]))
++    assert off["status"] == "not_measured"
++
++
++def test_offset_pairs_per_connection_instance_not_earliest(tmp_path):
++    """A reused 5-tuple pairs each flow start with its own connection."""
++    p = tmp_path / "reuse.pcap"
++    pkts = []
++    for ts in (BASE + 10.0, BASE + 11.0, BASE + 300.0, BASE + 301.0):
++        pkt = _tcp("10.0.0.1", "10.0.0.2", 44000, 80, seq=1)
++        pkt.time = ts
++        pkts.append(pkt)
++    wrpcap(str(p), pkts)
++
++    flows = [{"src": "10.0.0.1", "dst": "10.0.0.2", "sport": 44000,
++              "dport": 80, "proto": "tcp", "ts": ts}
++             for ts in (BASE + 17.0, BASE + 340.0)]
++    off = measure_clock_offset(p, flows)
++    assert off["status"] == "measured"
++    assert off["n_matched_tuples"] == 2
++    # two distinct deltas prove the instances were not collapsed to the
++    # earliest flow of the tuple (which would yield one bogus correction)
++    assert off["observed_delta"]["deltas_sec"] == [7.0, 40.0]
++
++
++# --------------------------------------------------------------------------
++# flow-table loading: null cells, padding vs garbage, protocol, many files
++# --------------------------------------------------------------------------
++def _ts_str(offset_sec):
++    """CIC ``dd/mm/yyyy hh:mm:ss`` (UTC) for BASE + offset_sec.
++
++    ``None`` yields an empty cell (a real null), a str passes through
++    (for genuinely unparsable values).
++    """
++    import datetime
++
++    if offset_sec is None:
++        return ""
++    if isinstance(offset_sec, str):
++        return offset_sec
++    dt = datetime.datetime.fromtimestamp(BASE + offset_sec,
++                                         datetime.timezone.utc)
++    return dt.strftime("%d/%m/%Y %H:%M:%S")
++
++
++def _flow_csv(path, rows):
++    """Write a CIC-shaped CSV from src/dst/ports/proto/timestamp/label rows."""
++    lines = ["Source IP,Destination IP,Source Port,Destination Port,"
++             " Protocol ,Timestamp,Label"]  # padded header, as in CIC files
++    for src, dst, sport, dport, proto, off, label in rows:
++        lines.append(f"{src},{dst},{sport},{dport},{proto},{_ts_str(off)},"
++                     f"{label}")
++    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
++    return path
++
++
++def test_load_flow_rows_null_label_and_missing_identity_never_become_nan(
++        tmp_path):
++    mod = _load_cli()
++    csv_path = _flow_csv(tmp_path / "f.csv", [
++        ("10.0.0.1", "10.0.0.2", 1111, 80, 6, 30.0, ""),        # null label
++        ("", "10.0.0.2", 1112, 80, 6, 31.0, "BENIGN"),          # no src IP
++    ])
++    rows, stats = mod.load_flow_rows(csv_path)
++
++    assert stats["flow_rows"] == 1
++    assert stats["rows_dropped_missing_identity"] == 1
++    assert rows[0]["label"] is None            # never the string "nan"
++    assert stats["labels_null"] == 1
++    assert "nan" not in {str(v).lower() for v in rows[0].values()}
++    assert rows[0]["proto"] == "tcp"
++
++
++def test_load_flow_rows_all_null_timestamp_column_is_padding_not_garbage(
++        tmp_path):
++    """The pinned snapshot's 288,602 padding rows: null timestamps are
++    reported as null (all-null), never counted as unparsable values."""
++    mod = _load_cli()
++    csv_path = _flow_csv(tmp_path / "pad.csv", [
++        ("10.0.0.1", "10.0.0.2", 1111, 80, 6, None, "BENIGN"),
++        ("10.0.0.1", "10.0.0.2", 1112, 80, 6, None, "BENIGN"),
++        ("10.0.0.1", "10.0.0.2", 1113, 80, 6, None, ""),
++    ])
++    rows, stats = mod.load_flow_rows(csv_path)
++
++    assert rows == []
++    assert stats["timestamp_null"] == 3
++    assert stats["timestamp_unparsable"] == 0
++    assert stats["timestamp_all_null"] is True
++
++
++def test_load_flow_rows_separates_unparsable_from_null_timestamps(tmp_path):
++    mod = _load_cli()
++    csv_path = _flow_csv(tmp_path / "mix.csv", [
++        ("10.0.0.1", "10.0.0.2", 1111, 80, 6, "not-a-date", "BENIGN"),
++        ("10.0.0.1", "10.0.0.2", 1112, 80, 6, 30.0, "BENIGN"),
++    ])
++    rows, stats = mod.load_flow_rows(csv_path)
++
++    assert stats["flow_rows"] == 1
++    assert stats["timestamp_null"] == 0
++    assert stats["timestamp_unparsable"] == 1
++    assert stats["timestamp_all_null"] is False
++
++
++def test_load_flow_rows_normalises_protocol_codes(tmp_path):
++    mod = _load_cli()
++    csv_path = _flow_csv(tmp_path / "proto.csv", [
++        ("10.0.0.1", "10.0.0.2", 1111, 53, 17, 30.0, "BENIGN"),
++        ("10.0.0.1", "10.0.0.2", 1112, 80, 6, 31.0, "BENIGN"),
++    ])
++    rows, _ = mod.load_flow_rows(csv_path)
++    assert [r["proto"] for r in rows] == ["udp", "tcp"]
++
++
++def test_load_flow_tables_concatenates_files_and_directories(tmp_path):
++    import pandas as pd
++
++    mod = _load_cli()
++    flows_dir = tmp_path / "flows"
++    flows_dir.mkdir()
++    _flow_csv(flows_dir / "a.csv",
++              [("10.0.0.1", "10.0.0.9", 1111, 80, 6, 30.0, "PortScan")])
++    pd.DataFrame([{
++        "Source IP": "10.0.0.2", "Destination IP": "10.0.0.9",
++        "Source Port": 2222, "Destination Port": 80, "Protocol": 6,
++        "Timestamp": _ts_str(30), "Label": "BENIGN",
++    }]).to_parquet(flows_dir / "x.parquet")
++    extra = _flow_csv(tmp_path / "c.csv",
++                      [("10.0.0.3", "10.0.0.9", 3333, 80, 6, 30.0, "BENIGN")])
++
++    rows, stats = mod.load_flow_tables([flows_dir, extra])
++
++    assert rows and len(rows) == 3
++    # deterministic order: parquet first, then csv, each sorted by name
++    assert stats["flow_files"] == ["x.parquet", "a.csv", "c.csv"]
++    assert stats["flow_files_count"] == 3
++    assert stats["flow_rows"] == 3
++    assert len(stats["files"]) == 3
++
++
++def test_resolve_flow_paths_rejects_missing_or_empty_inputs(tmp_path):
++    mod = _load_cli()
++    with pytest.raises(SystemExit):
++        mod.resolve_flow_paths([tmp_path / "absent.csv"])
++    empty_dir = tmp_path / "empty"
++    empty_dir.mkdir()
++    with pytest.raises(SystemExit):
++        mod.resolve_flow_paths([empty_dir])
++
++
++# --------------------------------------------------------------------------
++# CLI end-to-end: apply guard, coverage reporting, backwards policy
++# --------------------------------------------------------------------------
++def test_cli_applies_measured_offset_so_flow_bins_join(tmp_path):
++    """3 matched pairs, delta +7 s: applying it moves the packet bin onto the
++    flow bin. Without it the same join covers nothing - the difference is
++    measured, not assumed."""
++    mod = _load_cli()
++    pcap = _offset_pcap(tmp_path, n=3, name="shift.pcap", pkt_ts=BASE + 55.0)
++    flows = _flow_csv(tmp_path / "shift.csv", [
++        ("10.0.0.1", "10.0.0.2", 44000 + i, 80, 6, 62.0, "PortScan")
++        for i in range(3)])
++
++    applied = tmp_path / "applied.json"
++    assert mod.main(["--pcap", str(pcap), "--flows", str(flows),
++                     "--apply-offset", "--out", str(applied)]) == 0
++    payload = json.loads(applied.read_text(encoding="utf-8"))
++    assert payload["clock_offset"]["apply"]["eligible"] is True
++    assert payload["offset_applied_sec"] == pytest.approx(7.0)
++    assert payload["pcap"]["apply_offset_sec"] == pytest.approx(7.0)
++    assert payload["coverage"]["bins_flow_total"] == 1
++    assert payload["coverage"]["coverage_pct"] == pytest.approx(100.0)
++    assert payload["coverage"]["attack_coverage_pct"] == pytest.approx(100.0)
++    assert payload["rows"][0]["bin_start"] == BASE + 60
++    assert payload["rows"][0]["packet_features_covered"] is True
++
++    unapplied = tmp_path / "unapplied.json"
++    assert mod.main(["--pcap", str(pcap), "--flows", str(flows),
++                     "--out", str(unapplied)]) == 0
++    second = json.loads(unapplied.read_text(encoding="utf-8"))
++    assert second["offset_applied_sec"] == 0.0
++    assert second["coverage"]["coverage_pct"] == 0.0
++
++
++def test_cli_refuses_apply_offset_and_writes_no_output(tmp_path, capsys):
++    mod = _load_cli()
++    pcap = _offset_pcap(tmp_path, n=4, name="guard.pcap")
++
++    too_few = _flow_csv(tmp_path / "two.csv", [
++        ("10.0.0.1", "10.0.0.2", 44000 + i, 80, 6, 17.0, "BENIGN")
++        for i in range(2)])
++    out1 = tmp_path / "o1.json"
++    assert mod.main(["--pcap", str(pcap), "--flows", str(too_few),
++                     "--apply-offset", "--out", str(out1)]) == 1
++    assert not out1.exists()  # a refused apply must write nothing
++    assert "too few" in capsys.readouterr().err
++
++    unmatched = _flow_csv(tmp_path / "other.csv", [
++        ("10.9.9.1", "10.9.9.2", 44000, 80, 6, 17.0, "BENIGN")])
++    out2 = tmp_path / "o2.json"
++    assert mod.main(["--pcap", str(pcap), "--flows", str(unmatched),
++                     "--apply-offset", "--out", str(out2)]) == 1
++    assert not out2.exists()
++
++
++def test_cli_all_benign_flow_table_reports_null_attack_coverage(
++        tmp_path, capsys):
++    """No attack bins -> attack coverage is null / 'n/a', never 0.0%."""
++    mod = _load_cli()
++    pcap = tmp_path / "benign.pcap"
++    pkt = IP(src="10.0.0.1", dst="10.0.0.9") / UDP(sport=1, dport=2)
++    pkt.time = BASE + 10
++    wrpcap(str(pcap), [pkt])
++    flows = _flow_csv(tmp_path / "benign.csv", [
++        ("10.0.0.1", "10.0.0.9", 1, 2, 17, 30.0, "BENIGN")])
++    out = tmp_path / "benign.json"
++
++    assert mod.main(["--pcap", str(pcap), "--flows", str(flows),
++                     "--out", str(out)]) == 0
++    payload = json.loads(out.read_text(encoding="utf-8"))
++    assert payload["coverage"]["bins_attack_total"] == 0
++    assert payload["coverage"]["attack_coverage_pct"] is None
++    assert payload["coverage"]["coverage_pct"] == pytest.approx(100.0)
++    assert payload["clock_offset"]["status"] == "measured"  # proto-aware match
++    assert "n/a" in capsys.readouterr().out
++
++
++def test_cli_backwards_packet_exits_1_until_merge_is_requested(
++        tmp_path, capsys):
++    mod = _load_cli()
++    pcap = _backwards_pcap(tmp_path, "cli.pcap")
++    out = tmp_path / "c.json"
++
++    assert mod.main(["--pcap", str(pcap), "--out", str(out)]) == 1
++    assert "closed bin" in capsys.readouterr().err
++    assert not out.exists()
++
++    merged = tmp_path / "m.json"
++    assert mod.main(["--pcap", str(pcap), "--on-backwards", "merge",
++                     "--out", str(merged)]) == 0
++    payload = json.loads(merged.read_text(encoding="utf-8"))
++    assert payload["backwards_policy"]["on_backwards"] == "merge"
++    assert payload["pcap"]["backwards_packets_merged"] == 1
++    assert "late packets merged" in capsys.readouterr().out
++
++
++def test_cli_rejects_bad_arguments(tmp_path):
++    mod = _load_cli()
++    pcap = _backwards_pcap(tmp_path, "args.pcap")
++    with pytest.raises(SystemExit):
++        mod.main(["--pcap", str(pcap), "--bin-seconds", "0"])
++    with pytest.raises(SystemExit):
++        mod.main(["--pcap", str(pcap), "--reorder-grace-sec", "-1"])
++    with pytest.raises(SystemExit):  # --apply-offset needs --flows
++        mod.main(["--pcap", str(pcap), "--apply-offset"])
++    # a missing PCAP is a clean exit 1, not a traceback
++    assert mod.main(["--pcap", str(tmp_path / "absent.pcap")]) == 1
 +
 +

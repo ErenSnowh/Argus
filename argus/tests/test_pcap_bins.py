@@ -665,9 +665,8 @@ def test_packet_tier_has_no_training_or_benchmark_consumer_yet():
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
         if re.search(r"^\s*(from|import)\s+[\w.]*pcap_bins", text, re.M):
-            consumers.append(str(path.relative_to(ROOT)))
-    assert consumers == ["scripts\\pcap_stream_bins.py"] or consumers == [
-        "scripts/pcap_stream_bins.py"]
+            consumers.append(path.relative_to(ROOT).as_posix())
+    assert consumers == ["scripts/pcap_stream_bins.py"]
 
 
 # --------------------------------------------------------------------------

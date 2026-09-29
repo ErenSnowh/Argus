@@ -1198,7 +1198,7 @@ def test_resolve_flow_paths_rejects_missing_or_empty_inputs(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# CLI end-to-end: apply guard, coverage reporting, backwards policy
+# CLI end-to-end: apply guard, coverage reporting, late-packet policy
 # --------------------------------------------------------------------------
 def test_cli_applies_measured_offset_so_flow_bins_join(tmp_path):
     """40 matched second-precision flow rows pin the offset to <0.03 s.

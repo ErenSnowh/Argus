@@ -3,9 +3,11 @@
 pcap_stream_bins.py
 -------------------
 CLI for the streaming fixed-60 s-bin packet-tier extractor (plan D2
-amendment; D1 keying). Runs BEFORE any large PCAP download as the proposed
-and tested extraction path, and again on real captures to measure clock
-offset and flow/PCAP bin coverage.
+amendment; D1 keying). Runs BEFORE any large PCAP download as the proposed and
+tested extraction path, and again on real captures to measure clock offset and
+flow/PCAP bin coverage. It is a STANDALONE CLI: no training, binning or
+benchmark code consumes its output yet, because no real CIC PCAP has been
+measured and no combined flow+packet feature scope has been approved.
 
     python scripts/pcap_stream_bins.py --pcap data/sample_portscan.pcap
     python scripts/pcap_stream_bins.py --pcap thu.pcap \
@@ -17,22 +19,38 @@ Guarantees:
   * streams with PcapReader (never rdpcap), fixed floor(ts/60)*60 bins keyed
     (src_ip, bin_start) exactly as D1 keys flow bins, exactly one record per
     key; backwards packets fail closed (default) or merge when explicitly
-    requested (--on-backwards merge, bounded by --reorder-grace-sec);
-  * RST packets are never counted as retransmissions (the count is an
-    approximate duplicate-sequence proxy, stated in every output);
+    requested (--on-backwards merge, bounded by --reorder-grace-sec, default
+    1 s). Retained memory is bounded: a bin accumulator is held for at most
+    bin_seconds + --reorder-grace-sec of capture time and then finalised, so a
+    hours-late packet is counted in backwards_packets_late_dropped instead of
+    turning the extractor into a backlog;
+  * retransmission_count is a SEQUENCE-REGRESSION detector (duplicate byte
+    ranges per directional 5-tuple): RST and pure ACKs are never counted and
+    in-window reordering is never counted. The column name comes from
+    PACKET_LEVEL_COLUMNS; output carries feature_semantics saying what it
+    measures, because it is not a retransmission count;
   * --flows accepts multiple parquet/csv files AND directories (expanded to
     *.parquet + *.csv, sorted); missing labels/NaN cells are real nulls -
     never the string "nan"; all-null timestamp padding is reported as
     timestamp_null, distinct from genuinely unparsable timestamps;
+  * timestamp precision (0.001 / 1 / 60 s) is DETERMINED per flow file from
+    its own values (never from min/max, never assumed), counted over every
+    value; the run uses the coarsest file's step - the conservative bound -
+    and reports mixed or undeterminable precision. A capture's own precision is
+    measured the same way from its packet timestamps;
   * when --flows is given, output rows are the FLOW bins: uncovered bins get
     packet_features: null + packet_features_covered: false (never zero-filled)
     and coverage percentages (overall + attack bins) are written to the JSON
     over unique host-minute bins; an all-benign table yields attack coverage
     null (printed "n/a"), never 0.0;
-  * clock offset: the observed delta (observed_delta) is reported separately
-    from the apply decision (apply); --apply-offset FAILS with exit 1 when
-    the offset was not measured, matched too few connection instances, or
-    has ambiguous dispersion - it never silently applies 0.
+  * clock offset is a FEASIBLE INTERVAL, not a median: under floor
+    quantization a matched pair proves only delta <= theta + q_flow, so the
+    observed statistics (whose median is biased low - reported, never applied)
+    are kept separate from the apply decision. --apply-offset FAILS with exit
+    1 when the offset was not measured, matched too few connection instances,
+    has undetermined precision on either input, or leaves an interval that is
+    empty or wider than OFFSET_MAX_INTERVAL_WIDTH_SEC; it never silently
+    applies 0, and when it does apply it reports the worst-case error.
 
 Exit status: 0 on success, 1 on error (including a refused --apply-offset).
 """
@@ -50,8 +68,11 @@ from ml.world_model.pcap_bins import (  # noqa: E402
     BIN_KEY_SEMANTICS,
     BIN_SECONDS,
     BackwardsTimestampError,
+    DEFAULT_REORDER_GRACE_SEC,
+    MAX_REORDER_GRACE_SEC,
     bin_start_for,
     extract_pcap_bins,
+    infer_timestamp_quantization,
     join_packet_features,
     measure_bin_coverage,
     measure_clock_offset,
@@ -160,6 +181,14 @@ def load_flow_rows(path: Path) -> tuple[list[dict], dict]:
                       if cols["proto"] is not None else "tcp"),
         })
 
+    # Timestamp precision is DETERMINED from this file's own values (counted
+    # over every parsed value, never inferred from min/max, never assumed):
+    # sub-second component -> 0.001 s, off the 60 s grid -> 1 s, otherwise the
+    # values sit on the minute grid -> 60 s. Undeterminable (too few values)
+    # stays None and blocks --apply-offset instead of defaulting to 1 s.
+    precision = infer_timestamp_quantization(
+        epochs.tolist(), kind=f"flow_table:{path.name}")
+
     stats = {
         "flow_file": path.name,
         "flow_rows": len(rows),
@@ -169,6 +198,9 @@ def load_flow_rows(path: Path) -> tuple[list[dict], dict]:
         "timestamp_all_null": bool(len(df)) and null_ts == len(df),
         "labels_null": (int(df[cols["label"]].isna().sum())
                         if cols["label"] is not None else None),
+        "timestamp_precision": precision,
+        "timestamp_precision_sec": precision["quantization_sec"],
+        "timestamp_precision_known": precision["known"],
     }
     return rows, stats
 
@@ -210,6 +242,15 @@ def load_flow_tables(specs: list[Path]) -> tuple[list[dict], dict]:
         file_rows, file_stats = load_flow_rows(f)
         rows.extend(file_rows)
         per_file.append(file_stats)
+    known = [s for s in per_file if s["timestamp_precision_known"]]
+    unknown_files = [s["flow_file"] for s in per_file
+                     if not s["timestamp_precision_known"]]
+    steps = sorted({s["timestamp_precision_sec"] for s in known})
+    # Conservative aggregate: the COARSEST file's step, because assuming a
+    # finer one would wrongly narrow the feasible offset interval. If any file
+    # at all has undetermined precision the run cannot claim a step - an
+    # unknown precision blocks application rather than being guessed at.
+    precision_sec = max(steps) if (steps and not unknown_files) else None
     stats = {
         "flow_files": [s["flow_file"] for s in per_file],
         "flow_files_count": len(per_file),
@@ -222,6 +263,10 @@ def load_flow_tables(specs: list[Path]) -> tuple[list[dict], dict]:
         "timestamp_all_null_files": [
             s["flow_file"] for s in per_file if s["timestamp_all_null"]],
         "labels_null": sum(s["labels_null"] or 0 for s in per_file),
+        "timestamp_precision_sec": precision_sec,
+        "timestamp_precision_steps": steps,
+        "timestamp_precision_mixed": len(steps) > 1,
+        "timestamp_precision_unknown_files": unknown_files,
         "files": per_file,
     }
     return rows, stats
@@ -256,17 +301,23 @@ def main(argv: list[str] | None = None) -> int:
                     help="packet whose target bin already closed: 'fail' "
                          "(default - abort, nothing is silently dropped) or "
                          "'merge' into the retained accumulator")
-    ap.add_argument("--reorder-grace-sec", type=float, default=0.0,
-                    help="keep a bin open this long past its boundary before "
-                         "closing it (bounded reordering, default 0)")
+    ap.add_argument("--reorder-grace-sec", type=float,
+                    default=DEFAULT_REORDER_GRACE_SEC,
+                    help=f"keep a bin open this long past its boundary before "
+                         f"closing it (bounded reordering; default "
+                         f"{DEFAULT_REORDER_GRACE_SEC}s, max "
+                         f"{MAX_REORDER_GRACE_SEC}s - retained memory is "
+                         f"bin_seconds + grace)")
     args = ap.parse_args(argv)
 
     if args.apply_offset and not args.flows:
         ap.error("--apply-offset requires --flows (offset must be measured)")
     if args.bin_seconds <= 0:
         ap.error("--bin-seconds must be > 0")
-    if args.reorder_grace_sec < 0:
-        ap.error("--reorder-grace-sec must be >= 0")
+    if not 0 <= args.reorder_grace_sec <= MAX_REORDER_GRACE_SEC:
+        ap.error(f"--reorder-grace-sec must be within "
+                 f"[0, {MAX_REORDER_GRACE_SEC}] (retained memory is "
+                 f"bin_seconds + grace)")
     if not args.pcap.is_file():
         print(f"ERROR: PCAP not found: {args.pcap}", file=sys.stderr)
         return 1
@@ -278,7 +329,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.flows is not None:
         flow_rows, flow_stats = load_flow_tables(args.flows)
 
-    offset = measure_clock_offset(args.pcap, flow_rows)
+    # The flow-table timestamp step is passed in as the per-file measurement
+    # (coarsest file wins, unknown blocks application) rather than being
+    # re-guessed here from a handful of matched rows.
+    offset = measure_clock_offset(
+        args.pcap, flow_rows,
+        flow_quantization_sec=(flow_stats.get("timestamp_precision_sec")
+                               if flow_stats else None))
     apply_block = offset.get("apply") or {}
     apply_sec = 0.0
     if args.apply_offset:
@@ -304,6 +361,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     records = extraction["records"]
+    stats = extraction["stats"]
 
     if flow_rows:
         flow_keys = [(r["src"], bin_start_for(r["ts"], args.bin_seconds))
@@ -337,11 +395,36 @@ def main(argv: list[str] | None = None) -> int:
         "backwards_policy": {
             "on_backwards": args.on_backwards,
             "reorder_grace_sec": args.reorder_grace_sec,
+            "retention_horizon_sec": (args.bin_seconds
+                                      + args.reorder_grace_sec),
             "note": "'fail' aborts rather than dropping late packets; "
-                    "'merge' folds them into the retained bin and counts "
-                    "them in pcap.backwards_packets_merged",
+                    "'merge' folds them into a retained bin and counts them "
+                    "in pcap.backwards_packets_merged. A bin is retained for "
+                    "at most bin_seconds + reorder_grace_sec of capture time, "
+                    "so retained memory depends on the grace and never on "
+                    "capture length; packets later than that are counted in "
+                    "pcap.backwards_packets_late_dropped",
         },
-        "pcap": extraction["stats"],
+        "feature_semantics": stats["feature_semantics"],
+        "timestamp_precision": {
+            "flow_table_sec": (flow_stats.get("timestamp_precision_sec")
+                               if flow_stats else None),
+            "flow_table_steps": (flow_stats.get("timestamp_precision_steps")
+                                 if flow_stats else []),
+            "flow_table_mixed_files": (
+                bool(flow_stats.get("timestamp_precision_mixed"))
+                if flow_stats else False),
+            "flow_table_unknown_files": (
+                flow_stats.get("timestamp_precision_unknown_files", [])
+                if flow_stats else []),
+            "pcap_sec": ((offset.get("observed_delta") or {})
+                         .get("packet_timestamp_precision") or {}).get(
+                             "quantization_sec"),
+            "note": "each source's step (0.001/1/60 s) is determined from its "
+                    "own values, never assumed; an undetermined step blocks "
+                    "--apply-offset rather than defaulting to 1 s",
+        },
+        "pcap": stats,
         "flows": flow_stats or {"status": "not_measured",
                                 "reason": "no flow table supplied"},
         "clock_offset": offset,
@@ -355,14 +438,19 @@ def main(argv: list[str] | None = None) -> int:
     }
     out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    stats = extraction["stats"]
     print(f"pcap      : {args.pcap}")
     print(f"bins      : {len(records)} packet-tier bins "
-          f"({stats['packets_considered']} IP packets)")
+          f"({stats['packets_considered']} IP packets, "
+          f"peak retained {stats['peak_retained_bins']})")
     if stats["backwards_packets_merged"]:
         print(f"backwards : {stats['backwards_packets_merged']} late packets "
               f"merged (on_backwards=merge, "
               f"grace={stats['reorder_grace_sec']}s)")
+    if stats["backwards_packets_late_dropped"]:
+        print(f"late      : {stats['backwards_packets_late_dropped']} packets "
+              f"arrived beyond the retention horizon "
+              f"({stats['retention_horizon_sec']}s) - counted as dropped, "
+              f"never absorbed into a backlog", file=sys.stderr)
     if flow_stats:
         files = flow_stats["flow_files"]
         shown = ", ".join(files if len(files) <= 4
@@ -374,21 +462,41 @@ def main(argv: list[str] | None = None) -> int:
               f"{flow_stats['timestamp_all_null_files'] or 'none'}), "
               f"unparsable ts {flow_stats['timestamp_unparsable']}, "
               f"null labels {flow_stats['labels_null']}")
-    print(f"offset    : {offset['status']}"
-          + (f" median={offset['median_sec']:+.3f}s "
-             f"iqr={offset['dispersion_iqr_sec']:.3f}s "
-             f"n={offset['n_matched_tuples']} "
-             f"flags={apply_block.get('flags') or 'none'}"
-             if offset["status"] == "measured"
-             else f" ({offset.get('reason')})"))
+        print(f"          : ts precision "
+              f"{flow_stats['timestamp_precision_sec']} (per-file steps "
+              f"{flow_stats['timestamp_precision_steps']}, mixed "
+              f"{flow_stats['timestamp_precision_mixed']}, unknown "
+              f"{flow_stats['timestamp_precision_unknown_files'] or 'none'})")
+    obs = offset.get("observed_delta") or {}
+    interval = obs.get("feasible_interval") or {}
+    if offset["status"] == "measured":
+        q_flow = obs["flow_timestamp_precision"]["quantization_sec"]
+        q_pcap = obs["packet_timestamp_precision"]["quantization_sec"]
+        biased = obs["median_sec_biased_under_quantization"]
+        print(f"offset    : measured n={offset['n_matched_pairs']} "
+              f"delta=[{obs['min_sec']:+.3f},{obs['max_sec']:+.3f}]s "
+              f"median(biased)={biased:+.3f}s")
+        print(f"          : q_flow={q_flow}s q_pcap={q_pcap}s "
+              f"flags={apply_block.get('flags') or 'none'}")
+        if interval.get("computable"):
+            state = "EMPTY" if interval["empty"] else "feasible"
+            print(f"interval  : [{interval['lo_sec']:+.6f}, "
+                  f"{interval['hi_sec']:+.6f}) {state} "
+                  f"width={interval['width_sec']:.6f}s")
+        else:
+            print(f"interval  : not computable ({interval.get('reason')})")
+    else:
+        print(f"offset    : not measured ({offset.get('reason')})")
+    err = apply_block.get("max_error_sec")
+    err_note = (f"worst-case error {err:.6f}s"
+                if isinstance(err, (int, float)) else "worst-case error unknown")
     if args.apply_offset:
-        apply_note = f"applied {apply_sec:+.3f}s"
+        apply_note = f"applied {apply_sec:+.6f}s ({err_note})"
     elif apply_block.get("eligible"):
-        apply_note = "eligible but not applied (no --apply-offset given)"
+        apply_note = f"eligible, not applied (no --apply-offset); {err_note}"
     else:
         apply_note = ("refused: "
-                      + str(apply_block.get("reason")
-                            or offset.get("reason")))
+                      + str(apply_block.get("reason") or offset.get("reason")))
     print(f"apply     : {apply_note}")
     if "coverage_pct" in coverage:
         print(f"coverage  : {coverage['bins_covered']}/"

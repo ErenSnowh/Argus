@@ -14,16 +14,18 @@ each fixing a defect of the old demo path:
   TTL/window/payload lists - and open bins are closed by a **watermark scan
   that runs only when the capture crosses a new bin boundary**, not once per
   packet.
-* **Backwards timestamps are never silent, and reordering is memory-bounded.**
-  A packet that targets a bin the watermark already closed is either an error
-  (default ``on_backwards="fail"`` raises :class:`BackwardsTimestampError`) or
-  an explicitly requested, counted merge (``on_backwards="merge"``, bounded by
-  ``reorder_grace_sec``). Retaining a closed accumulator is bounded too: a bin
-  is held for at most ``bin_seconds + reorder_grace_sec`` of capture time
-  (``stats["retention_horizon_sec"]``) before it is finalised and freed, so a
-  packet arriving hours late can never keep an old accumulator alive - in
-  ``merge`` mode such a packet is counted in
-  ``backwards_packets_late_dropped``, in ``fail`` mode it aborts the run.
+* **Late packets fail closed; dropping them is an explicit opt-in.** A packet
+  that targets a bin the watermark already closed - one arriving later than
+  ``reorder_grace_sec`` after its window - is an error by default
+  (``on_late="fail"`` raises :class:`BackwardsTimestampError` naming the
+  timestamp, the bin key, the watermark and both remedies). Only
+  ``on_late="drop"`` accepts the loss: every such packet is counted in
+  ``stats["backwards_packets_late_dropped"]`` and the affected bin keys are
+  listed in ``stats["bins_with_dropped_packets"]``. Reordering *inside* the
+  grace needs no opt-in - the bin is still open - and retention stays bounded
+  at ``bin_seconds + reorder_grace_sec`` of capture time
+  (``stats["retention_horizon_sec"]``), so retained memory never tracks the
+  length of the capture.
   Exactly one record is emitted per ``(src_ip, bin_start)`` by construction
   (records come from a dict keyed by that tuple).
 * **Bin identity = emitted-by host.** The bin key ``(src_ip, bin_start)``
@@ -218,10 +220,12 @@ BIN_KEY_SEMANTICS = (
 class BackwardsTimestampError(ValueError):
     """A packet targeted a bin the watermark already closed.
 
-    Raised by :func:`extract_pcap_bins` with the default
-    ``on_backwards="fail"`` policy so that out-of-order capture data is an
-    explicit, visible failure instead of silent deduplication loss. Pass
-    ``on_backwards="merge"`` to accept and count such packets instead.
+    Raised by :func:`extract_pcap_bins` under the default ``on_late="fail"``
+    policy so that out-of-order capture data is an explicit, visible failure
+    instead of silent loss. The message names both remedies: widen
+    ``reorder_grace_sec`` (up to :data:`MAX_REORDER_GRACE_SEC`) when the
+    reordering is genuine and bounded, or pass ``on_late="drop"`` to accept
+    and count the dropped packets.
     """
 
 
@@ -445,7 +449,7 @@ def extract_pcap_bins(
     pcap_path: str | Path,
     bin_seconds: int = BIN_SECONDS,
     apply_offset_sec: float = 0.0,
-    on_backwards: str = "fail",
+    on_late: str = "fail",
     reorder_grace_sec: float = DEFAULT_REORDER_GRACE_SEC,
 ) -> dict[str, Any]:
     """Stream a PCAP and return packet-tier records on the D1 bin grid.
@@ -460,31 +464,36 @@ def extract_pcap_bins(
     :func:`measure_clock_offset` (whose ``apply.max_error_sec`` then bounds the
     worst-case per-packet bin error), never a hand-picked number.
 
-    Ordering policy (backwards timestamps are never silent, and reordering is
-    memory-bounded):
+    Ordering policy - a late packet is never silent, and reordering is
+    memory-bounded:
 
     * The extractor keeps one bounded set of accumulators and closes them with
       a **watermark scan that runs only when the capture crosses a bin
       boundary** (``stats["watermark_scans"]``), not on every packet.
-    * ``on_backwards="fail"`` (default): a packet whose target bin is already
-      closed raises :class:`BackwardsTimestampError`.
-    * ``on_backwards="merge"``: such packets are folded into the bin's
-      accumulator and counted in ``stats["backwards_packets_merged"]``.
-    * Retention is bounded: an accumulator is held for at most
+    * A packet is *late* when its bin is already closed: the watermark passed
+      ``bin_start + bin_seconds + reorder_grace_sec`` before it arrived.
+      Reordering inside the grace is not late at all - the accumulator is still
+      open and simply takes the packet.
+    * ``on_late="fail"`` (default): a late packet raises
+      :class:`BackwardsTimestampError` naming its timestamp, the bin key, the
+      watermark and both remedies (a larger ``reorder_grace_sec``, or
+      ``on_late="drop"``). Nothing is ever dropped to keep a run going.
+    * ``on_late="drop"``: the packet is discarded and counted in
+      ``stats["backwards_packets_late_dropped"]``, and its bin key is listed in
+      ``stats["bins_with_dropped_packets"]`` - the loss is visible per bin,
+      never folded into an already-finalised record.
+    * Retention is bounded either way: an accumulator is held for at most
       ``bin_seconds + reorder_grace_sec`` (``stats["retention_horizon_sec"]``)
       of capture time past its own window and then finalised and freed, so
       retained memory depends on the grace, never on capture length
-      (``stats["peak_retained_bins"]`` reports the high-water mark). A packet
-      arriving after that is counted in
-      ``stats["backwards_packets_late_dropped"]`` - never silently absorbed by
-      an unbounded backlog.
+      (``stats["peak_retained_bins"]`` reports the high-water mark).
     """
     from scapy.layers.inet import IP, TCP, UDP
     from scapy.utils import PcapReader
 
-    if on_backwards not in ("fail", "merge"):
+    if on_late not in ("fail", "drop"):
         raise ValueError(
-            f"on_backwards must be 'fail' or 'merge', got {on_backwards!r}")
+            f"on_late must be 'fail' or 'drop', got {on_late!r}")
     if not 0.0 <= reorder_grace_sec <= MAX_REORDER_GRACE_SEC:
         raise ValueError(
             f"reorder_grace_sec must be within [0, {MAX_REORDER_GRACE_SEC}] "
@@ -495,20 +504,20 @@ def extract_pcap_bins(
     if not path.exists():
         raise FileNotFoundError(f"PCAP not found: {pcap_path}")
 
-    # One dict holds every accumulator still in memory: bins still open, plus
-    # (in "merge" mode) bins whose window closed but that are inside the
-    # retention horizon and may still receive a late packet. A bin leaves this
-    # dict - and its memory - once the watermark passes its window plus
-    # retention_sec, so retained memory is bounded by the grace, never by the
-    # length of the capture.
+    # One dict holds every accumulator still in memory: the bins whose window
+    # plus the reorder grace has not ended. A bin leaves this dict - and its
+    # memory - once the watermark passes that horizon, so retained memory is
+    # bounded by the grace and never by the length of the capture. A closed bin
+    # is never reopened: a late packet fails the run or is counted as dropped,
+    # so nothing is ever retained for a packet that may not come.
     bins: dict[FlowKey, _BinAccumulator] = {}
     flushed: list[dict[str, Any]] = []
     retention_sec = bin_seconds + reorder_grace_sec
     packets = 0
     non_monotonic = 0
     watermark_scans = 0
-    backwards_merged = 0
     late_dropped = 0
+    late_bins: set[FlowKey] = set()
     ranges_capped_total = 0
     peak_retained = 0
     first_ts: Optional[float] = None
@@ -523,18 +532,17 @@ def extract_pcap_bins(
         flushed.append(acc.record())
 
     def _close_past(t: float) -> None:
-        """Close bins whose window (plus grace) ended; free past retention.
+        """Close and free bins whose window (plus grace) has ended.
 
         Runs only when the capture crosses a bin boundary - not per packet -
-        which is the point of the watermark.
+        which is the point of the watermark. Closing is final: nothing is
+        retained "in case" a late packet turns up, which is what keeps
+        ``peak_retained_bins`` a function of the grace alone.
         """
         nonlocal watermark_scans, peak_retained
         watermark_scans += 1
         cutoff_close = t - reorder_grace_sec
-        cutoff_free = t - retention_sec
         for k in [k for k in bins if k[1] + bin_seconds <= cutoff_close]:
-            if on_backwards == "merge" and k[1] + bin_seconds > cutoff_free:
-                continue  # retention horizon: keep accepting late merges
             _release(bins.pop(k))
         peak_retained = max(peak_retained, len(bins))
 
@@ -560,30 +568,29 @@ def extract_pcap_bins(
             if not _is_closed(key, watermark, bin_seconds, reorder_grace_sec):
                 if acc is None:
                     acc = bins[key] = _BinAccumulator(key[0], key[1])
-            elif on_backwards == "fail":
-                # The watermark already moved past this bin's window: a
-                # packet arriving after its bin closed. Never silent - fail.
+            elif on_late == "fail":
+                # The watermark already moved past this bin's window plus the
+                # grace: the packet is late, and the default answer to a late
+                # packet is a visible failure, never a silent loss. The message
+                # names both remedies so the operator can pick one knowingly.
                 raise BackwardsTimestampError(
-                    f"packet at ts={ts} targets closed bin {key} "
-                    f"(watermark={watermark}); capture moved backwards beyond "
-                    f"reorder_grace_sec={reorder_grace_sec}. Re-run with "
-                    f"on_backwards='merge' to accept bounded reordering "
-                    f"(retention horizon {retention_sec}s) instead of "
-                    f"failing.")
-            elif acc is None and (key[1] + bin_seconds
-                                  <= watermark - retention_sec):
-                # Its accumulator was finalised and freed with the retention
-                # horizon: an hours-late packet can only be counted as a loss,
-                # never absorbed by an unbounded backlog.
-                late_dropped += 1
-                continue
+                    f"packet at ts={ts} targets bin "
+                    f"{key[0]}@{key[1]}, whose window closed at "
+                    f"watermark={watermark} (reorder_grace_sec="
+                    f"{reorder_grace_sec}s): the capture moved backwards "
+                    f"further than the grace. Either re-run with a larger "
+                    f"--reorder-grace-sec (up to {MAX_REORDER_GRACE_SEC}s; "
+                    f"retained memory is bin_seconds + grace) to accept "
+                    f"bounded reordering, or with --on-late drop to take the "
+                    f"loss as a counted gap in "
+                    f"pcap.backwards_packets_late_dropped.")
             else:
-                if acc is None:
-                    # Old bin seen for the first time, still inside the
-                    # retention horizon: create it; the next scan finalises it.
-                    acc = bins[key] = _BinAccumulator(key[0], key[1])
-                else:
-                    backwards_merged += 1  # late packet into a retained bin
+                # on_late == "drop": the bin is finalised and its memory is
+                # gone, so this packet can only be a counted, per-bin gap -
+                # never absorbed into a backlog or into a closed record.
+                late_dropped += 1
+                late_bins.add(key)
+                continue
             acc.add(pkt, ts, ip, tcp, udp)
 
             # Watermark advances with capture time; the close scan runs only
@@ -595,8 +602,8 @@ def extract_pcap_bins(
                     _close_past(watermark)
                     last_boundary = boundary
 
-    # End of capture: every accumulator still held (open bins, and retained
-    # bins in merge mode) is finalised - nothing is dropped at the tail.
+    # End of capture: every accumulator still held (the bins still inside the
+    # grace) is finalised - nothing is dropped at the tail.
     for k in list(bins):
         _release(bins.pop(k))
 
@@ -612,9 +619,11 @@ def extract_pcap_bins(
             "first_pkt_ts": first_ts,
             "last_pkt_ts": last_ts,
             "non_monotonic_steps": non_monotonic,
-            "backwards_policy": on_backwards,
-            "backwards_packets_merged": backwards_merged,
+            "late_policy": on_late,
             "backwards_packets_late_dropped": late_dropped,
+            "bins_with_dropped_packets": [
+                {"src_ip": k[0], "bin_start": k[1]}
+                for k in sorted(late_bins, key=lambda k: (k[1], k[0]))],
             "reorder_grace_sec": reorder_grace_sec,
             "retention_horizon_sec": retention_sec,
             "peak_retained_bins": peak_retained,

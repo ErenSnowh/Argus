@@ -277,7 +277,7 @@ def test_load_flow_rows_epoch_not_corrupted_by_pandas_unit(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# backwards timestamps: fail closed by default, counted merge on request
+# late packets: fail closed by default, a counted drop only on request
 # --------------------------------------------------------------------------
 def _backwards_pcap(tmp_path, name="backwards.pcap"):
     """Two bins, then a packet belonging to the bin already closed."""
@@ -291,41 +291,54 @@ def _backwards_pcap(tmp_path, name="backwards.pcap"):
     return p
 
 
-def test_backwards_packet_fails_closed_by_default(tmp_path):
+def test_late_packet_fails_closed_and_names_both_remedies(tmp_path):
+    """The default policy aborts, and the message makes the choice possible."""
     p = _backwards_pcap(tmp_path)
     with pytest.raises(BackwardsTimestampError) as exc:
         extract_pcap_bins(p, bin_seconds=BIN)
-    # the error must say how to opt into reordering - never drop silently
-    assert "on_backwards='merge'" in str(exc.value)
+    msg = str(exc.value)
+    # every fact needed to decide, without reading the source
+    assert f"ts={BASE + 20.0}" in msg
+    assert f"10.0.0.1@{BASE}" in msg
+    assert f"watermark={BASE + 120.0}" in msg
+    assert "--reorder-grace-sec" in msg and "300" in msg
+    assert "--on-late drop" in msg
 
 
-def test_backwards_merge_keeps_and_counts_the_packet(tmp_path):
-    p = _backwards_pcap(tmp_path, "merge.pcap")
-    result = extract_pcap_bins(p, bin_seconds=BIN, on_backwards="merge")
-    keys = [(r["src_ip"], r["bin_start"]) for r in result["records"]]
-    assert len(keys) == len(set(keys))  # exactly one record per key
+def test_late_packet_is_dropped_and_counted_only_when_requested(tmp_path):
+    p = _backwards_pcap(tmp_path, "drop.pcap")
+    result = extract_pcap_bins(p, bin_seconds=BIN, on_late="drop")
     by_key = {(r["src_ip"], r["bin_start"]): r for r in result["records"]}
-    assert by_key[("10.0.0.1", BASE)]["packet_count"] == 2  # late one kept
+    assert by_key[("10.0.0.1", BASE)]["packet_count"] == 1  # late one NOT kept
     assert by_key[("10.0.0.1", BASE + 120)]["packet_count"] == 1
-    assert result["stats"]["backwards_packets_merged"] == 1
-    assert result["stats"]["non_monotonic_steps"] == 1
+    stats = result["stats"]
+    assert stats["late_policy"] == "drop"
+    assert stats["backwards_packets_late_dropped"] == 1
+    assert stats["bins_with_dropped_packets"] == [
+        {"src_ip": "10.0.0.1", "bin_start": BASE}]
+    assert stats["non_monotonic_steps"] == 1
+    # a drop is a gap in the output, never a widening of a finalised record
+    assert sum(r["packet_count"] for r in result["records"]) == 2
 
 
 def test_reorder_grace_keeps_a_recent_bin_open_without_failing(tmp_path):
     p = _backwards_pcap(tmp_path, "grace.pcap")
     # 90 s grace: bin BASE is still open when the late packet arrives, so the
-    # default fail policy never triggers and nothing needs merging.
+    # default fail policy never triggers and nothing needs dropping.
     result = extract_pcap_bins(p, bin_seconds=BIN, reorder_grace_sec=90.0)
     by_key = {(r["src_ip"], r["bin_start"]): r for r in result["records"]}
     assert by_key[("10.0.0.1", BASE)]["packet_count"] == 2
-    assert result["stats"]["backwards_packets_merged"] == 0
+    assert result["stats"]["backwards_packets_late_dropped"] == 0
     assert result["stats"]["reorder_grace_sec"] == 90.0
 
 
-def test_invalid_backwards_policy_and_grace_are_rejected(tmp_path):
+def test_invalid_late_policy_and_grace_are_rejected(tmp_path):
     p = _backwards_pcap(tmp_path, "invalid.pcap")
     with pytest.raises(ValueError):
-        extract_pcap_bins(p, bin_seconds=BIN, on_backwards="ignore")
+        extract_pcap_bins(p, bin_seconds=BIN, on_late="ignore")
+    # the removed merge mode must not survive as an unlisted alias
+    with pytest.raises(ValueError):
+        extract_pcap_bins(p, bin_seconds=BIN, on_late="merge")
     with pytest.raises(ValueError):
         extract_pcap_bins(p, bin_seconds=BIN, reorder_grace_sec=-1.0)
     # an unbounded grace IS the backlog this extractor exists to avoid
@@ -334,7 +347,7 @@ def test_invalid_backwards_policy_and_grace_are_rejected(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# reordering is memory-bounded: retention horizon, not an unbounded backlog
+# reordering is memory-bounded: closed bins are freed, late packets counted
 # --------------------------------------------------------------------------
 def _timed_pcap(tmp_path, times, name):
     p = tmp_path / name
@@ -347,46 +360,53 @@ def _timed_pcap(tmp_path, times, name):
     return p
 
 
-def test_default_reorder_grace_is_nonzero_and_bounded(tmp_path):
+def test_default_late_policy_fails_and_grace_is_bounded(tmp_path):
     p = _timed_pcap(tmp_path, [BASE + 10.0], "default-grace.pcap")
     stats = extract_pcap_bins(p, bin_seconds=BIN)["stats"]
     assert DEFAULT_REORDER_GRACE_SEC == 1.0  # the review's recommendation
     assert stats["reorder_grace_sec"] == DEFAULT_REORDER_GRACE_SEC
     assert stats["retention_horizon_sec"] == BIN + DEFAULT_REORDER_GRACE_SEC
-    assert stats["backwards_policy"] == "fail"
-
-
-def test_late_packet_inside_retention_merges_and_is_counted(tmp_path):
-    """A 50 s-late packet is a counted merge, not an abort, in merge mode."""
-    p = _timed_pcap(tmp_path, [BASE + 5.0, BASE + 70.0, BASE + 20.0],
-                    "in-window.pcap")
-    result = extract_pcap_bins(p, bin_seconds=BIN, on_backwards="merge")
-    by_key = {(r["src_ip"], r["bin_start"]): r for r in result["records"]}
-    assert by_key[("10.0.0.1", BASE)]["packet_count"] == 2
-    stats = result["stats"]
-    assert stats["backwards_packets_merged"] == 1
+    assert stats["late_policy"] == "fail"
+    # dropping is never a side effect of not asking
     assert stats["backwards_packets_late_dropped"] == 0
+    assert stats["bins_with_dropped_packets"] == []
 
 
-def test_hours_late_packet_is_counted_as_dropped_not_retained(tmp_path):
-    """Merge mode must never become an unbounded backlog of old accumulators."""
+def test_late_burst_for_one_bin_is_counted_once_per_bin(tmp_path):
+    """Three late packets for one closed bin: three drops, one listed key."""
+    p = _timed_pcap(tmp_path, [BASE + 5.0, BASE + 70.0, BASE + 20.0,
+                               BASE + 25.0, BASE + 30.0], "late-burst.pcap")
+    result = extract_pcap_bins(p, bin_seconds=BIN, on_late="drop")
+    stats = result["stats"]
+    assert stats["backwards_packets_late_dropped"] == 3
+    assert stats["bins_with_dropped_packets"] == [
+        {"src_ip": "10.0.0.1", "bin_start": BASE}]
+    by_key = {(r["src_ip"], r["bin_start"]): r for r in result["records"]}
+    assert by_key[("10.0.0.1", BASE)]["packet_count"] == 1
+
+
+def test_hours_late_packet_never_keeps_an_old_bin_alive(tmp_path):
+    """An hours-late packet is a counted gap the extractor never stores."""
     p = _timed_pcap(
         tmp_path, [BASE + 5.0, BASE + 10.0, BASE + 7205.0, BASE + 12.0],
         "very-late.pcap")
-    result = extract_pcap_bins(p, bin_seconds=BIN, on_backwards="merge")
+    result = extract_pcap_bins(p, bin_seconds=BIN, on_late="drop")
     stats = result["stats"]
     by_key = {(r["src_ip"], r["bin_start"]): r for r in result["records"]}
     assert by_key[("10.0.0.1", BASE)]["packet_count"] == 2  # early pair kept
-    assert ("10.0.0.1", BASE + 7200) in by_key
+    assert ("10.0.0.1", BASE + 7200) in by_key  # the new bin is a fresh bin
     assert stats["backwards_packets_late_dropped"] == 1
-    assert stats["backwards_packets_merged"] == 0
+    assert stats["bins_with_dropped_packets"] == [
+        {"src_ip": "10.0.0.1", "bin_start": BASE}]
+    # two hours of capture, and memory still only ever held the current bin
+    # plus the one still inside its grace
+    assert stats["peak_retained_bins"] <= 2
 
 
-def _growth_stats(tmp_path, n_bins, on_backwards="merge"):
+def _growth_stats(tmp_path, n_bins, on_late="drop"):
     p = _timed_pcap(tmp_path, [BASE + i * 3.0 for i in range(n_bins * 20)],
-                    f"growth-{n_bins}-{on_backwards}.pcap")
-    result = extract_pcap_bins(p, bin_seconds=BIN,
-                               on_backwards=on_backwards)
+                    f"growth-{n_bins}-{on_late}.pcap")
+    result = extract_pcap_bins(p, bin_seconds=BIN, on_late=on_late)
     stats = result["stats"]
     assert stats["retention_horizon_sec"] == BIN + DEFAULT_REORDER_GRACE_SEC
     assert sum(r["packet_count"] for r in result["records"]) == n_bins * 20
@@ -1150,9 +1170,9 @@ def test_resolve_flow_paths_rejects_missing_or_empty_inputs(tmp_path):
 def test_cli_applies_measured_offset_so_flow_bins_join(tmp_path):
     """40 matched second-precision flow rows pin the offset to <0.03 s.
 
-    Applying that measured correction moves every packet bin onto the flow bin;
-    without it the same join covers nothing. The difference is measured, and the
-    run reports the worst-case error it is claiming.
+    Applying that measured correction moves every packet bin onto the flow
+    bin; without it the same join covers nothing. The difference is measured,
+    and the run reports the worst-case error it is claiming.
     """
     mod = _load_cli()
     pcap = _offset_pcap(tmp_path, n=40, name="shift.pcap",
@@ -1231,24 +1251,42 @@ def test_cli_all_benign_flow_table_reports_null_attack_coverage(
     assert "n/a" in capsys.readouterr().out
 
 
-def test_cli_backwards_packet_exits_1_until_merge_is_requested(
-        tmp_path, capsys):
+def test_cli_late_packet_exits_1_until_drop_is_requested(tmp_path, capsys):
+    """Fail closed: no output file at all until the operator opts into loss."""
     mod = _load_cli()
     pcap = _backwards_pcap(tmp_path, "cli.pcap")
     out = tmp_path / "c.json"
 
     assert mod.main(["--pcap", str(pcap), "--out", str(out)]) == 1
-    assert "closed bin" in capsys.readouterr().err
-    assert not out.exists()
+    err = capsys.readouterr().err
+    assert "targets bin 10.0.0.1@" in err and "watermark=" in err
+    assert "--reorder-grace-sec" in err and "--on-late drop" in err
+    assert not out.exists()  # a partial bin set must never look like a result
 
-    merged = tmp_path / "m.json"
-    assert mod.main(["--pcap", str(pcap), "--on-backwards", "merge",
-                     "--out", str(merged)]) == 0
-    payload = json.loads(merged.read_text(encoding="utf-8"))
-    assert payload["backwards_policy"]["on_backwards"] == "merge"
-    assert payload["backwards_policy"]["retention_horizon_sec"] == BIN + 1.0
-    assert payload["pcap"]["backwards_packets_merged"] == 1
-    assert "late packets merged" in capsys.readouterr().out
+    dropped = tmp_path / "d.json"
+    assert mod.main(["--pcap", str(pcap), "--on-late", "drop",
+                     "--out", str(dropped)]) == 0
+    payload = json.loads(dropped.read_text(encoding="utf-8"))
+    assert payload["late_policy"]["on_late"] == "drop"
+    assert payload["late_policy"]["retention_horizon_sec"] == BIN + 1.0
+    assert payload["pcap"]["backwards_packets_late_dropped"] == 1
+    assert payload["pcap"]["bins_with_dropped_packets"] == [
+        {"src_ip": "10.0.0.1", "bin_start": BASE}]
+    assert "were DROPPED" in capsys.readouterr().err
+
+
+def test_cli_widening_the_grace_absorbs_the_reordering(tmp_path, capsys):
+    """The other remedy: with 90 s of grace the late packet is on time."""
+    mod = _load_cli()
+    pcap = _backwards_pcap(tmp_path, "cli-grace.pcap")
+    out = tmp_path / "g.json"
+
+    assert mod.main(["--pcap", str(pcap), "--reorder-grace-sec", "90",
+                     "--out", str(out)]) == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["pcap"]["backwards_packets_late_dropped"] == 0
+    assert payload["pcap"]["packets_considered"] == 3  # nothing is lost
+    capsys.readouterr()
 
 
 def test_cli_rejects_bad_arguments(tmp_path):
@@ -1258,6 +1296,8 @@ def test_cli_rejects_bad_arguments(tmp_path):
         mod.main(["--pcap", str(pcap), "--bin-seconds", "0"])
     with pytest.raises(SystemExit):
         mod.main(["--pcap", str(pcap), "--reorder-grace-sec", "-1"])
+    with pytest.raises(SystemExit):
+        mod.main(["--pcap", str(pcap), "--on-late", "merge"])
     with pytest.raises(SystemExit):  # grace would bound no memory at all
         mod.main(["--pcap", str(pcap), "--reorder-grace-sec", "100000"])
     with pytest.raises(SystemExit):  # --apply-offset needs --flows

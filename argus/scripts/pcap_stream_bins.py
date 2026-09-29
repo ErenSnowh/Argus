@@ -18,12 +18,14 @@ measured and no combined flow+packet feature scope has been approved.
 Guarantees:
   * streams with PcapReader (never rdpcap), fixed floor(ts/60)*60 bins keyed
     (src_ip, bin_start) exactly as D1 keys flow bins, exactly one record per
-    key; backwards packets fail closed (default) or merge when explicitly
-    requested (--on-backwards merge, bounded by --reorder-grace-sec, default
-    1 s). Retained memory is bounded: a bin accumulator is held for at most
-    bin_seconds + --reorder-grace-sec of capture time and then finalised, so a
-    hours-late packet is counted in backwards_packets_late_dropped instead of
-    turning the extractor into a backlog;
+    key; a packet that arrives after its bin closed FAILS CLOSED by default
+    (exit 1, no output file, the error names ts/bin key/watermark and both
+    remedies). Only --on-late drop accepts the loss, counting it in
+    pcap.backwards_packets_late_dropped and naming the affected bins in
+    pcap.bins_with_dropped_packets. Reordering inside --reorder-grace-sec
+    (default 1 s, max 300 s) needs no opt-in - the bin is still open - and
+    retained memory stays bounded at bin_seconds + grace of capture time, never
+    tracking capture length;
   * retransmission_count is a SEQUENCE-REGRESSION detector (duplicate byte
     ranges per directional 5-tuple): RST and pure ACKs are never counted and
     in-window reordering is never counted. The column name comes from
@@ -301,11 +303,14 @@ def main(argv: list[str] | None = None) -> int:
                          "MEASURED feasible clock-offset interval before "
                          "binning (requires --flows; refused with exit 1 "
                          "unless the offset is eligible)")
-    ap.add_argument("--on-backwards", choices=("fail", "merge"),
-                    default="fail",
-                    help="packet whose target bin already closed: 'fail' "
-                         "(default - abort, nothing is silently dropped) or "
-                         "'merge' into the retained accumulator")
+    ap.add_argument("--on-late", choices=("fail", "drop"), default="fail",
+                    help="packet whose bin already closed (it arrived later "
+                         "than bin_seconds + --reorder-grace-sec): 'fail' "
+                         "(default - exit 1, no output file, nothing is ever "
+                         "silently dropped) or 'drop', which discards it and "
+                         "counts the loss per bin in "
+                         "pcap.backwards_packets_late_dropped and "
+                         "pcap.bins_with_dropped_packets")
     ap.add_argument("--reorder-grace-sec", type=float,
                     default=DEFAULT_REORDER_GRACE_SEC,
                     help=f"keep a bin open this long past its boundary before "
@@ -360,9 +365,12 @@ def main(argv: list[str] | None = None) -> int:
         extraction = extract_pcap_bins(
             args.pcap, bin_seconds=args.bin_seconds,
             apply_offset_sec=apply_sec,
-            on_backwards=args.on_backwards,
+            on_late=args.on_late,
             reorder_grace_sec=args.reorder_grace_sec)
     except BackwardsTimestampError as exc:
+        # Fail closed: the run stops here, before any output file is written,
+        # so a late packet can never produce a partial bin set that looks
+        # complete. Both remedies are in the message.
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     records = extraction["records"]
@@ -397,18 +405,20 @@ def main(argv: list[str] | None = None) -> int:
         "bin_seconds": args.bin_seconds,
         "bin_key": "(src_ip, floor(unix_seconds / bin_seconds) * "
                    "bin_seconds) in UTC",
-        "backwards_policy": {
-            "on_backwards": args.on_backwards,
+        "late_policy": {
+            "on_late": args.on_late,
             "reorder_grace_sec": args.reorder_grace_sec,
             "retention_horizon_sec": (args.bin_seconds
                                       + args.reorder_grace_sec),
-            "note": "'fail' aborts rather than dropping late packets; "
-                    "'merge' folds them into a retained bin and counts them "
-                    "in pcap.backwards_packets_merged. A bin is retained for "
-                    "at most bin_seconds + reorder_grace_sec of capture time, "
-                    "so retained memory depends on the grace and never on "
-                    "capture length; packets later than that are counted in "
-                    "pcap.backwards_packets_late_dropped",
+            "note": "a packet is late when it arrives after bin_seconds + "
+                    "reorder_grace_sec of capture time past its bin start. "
+                    "'fail' (default) exits 1 with no output file and names "
+                    "both remedies; 'drop' discards the packet and counts it "
+                    "in pcap.backwards_packets_late_dropped, naming the bins "
+                    "it would have filled in pcap.bins_with_dropped_packets. "
+                    "Reordering inside the grace is not late: the bin is "
+                    "open. Retained memory is bin_seconds + grace and never "
+                    "tracks capture length",
         },
         "feature_semantics": stats["feature_semantics"],
         "timestamp_precision": {
@@ -447,15 +457,17 @@ def main(argv: list[str] | None = None) -> int:
     print(f"bins      : {len(records)} packet-tier bins "
           f"({stats['packets_considered']} IP packets, "
           f"peak retained {stats['peak_retained_bins']})")
-    if stats["backwards_packets_merged"]:
-        print(f"backwards : {stats['backwards_packets_merged']} late packets "
-              f"merged (on_backwards=merge, "
-              f"grace={stats['reorder_grace_sec']}s)")
     if stats["backwards_packets_late_dropped"]:
+        bins_hit = stats["bins_with_dropped_packets"]
+        shown = ", ".join(f"{b['src_ip']}@{b['bin_start']}"
+                          for b in bins_hit[:4])
+        if len(bins_hit) > 4:
+            shown += f" (+{len(bins_hit) - 4} more)"
         print(f"late      : {stats['backwards_packets_late_dropped']} packets "
-              f"arrived beyond the retention horizon "
-              f"({stats['retention_horizon_sec']}s) - counted as dropped, "
-              f"never absorbed into a backlog", file=sys.stderr)
+              f"arrived after bin_seconds + grace = "
+              f"{stats['retention_horizon_sec']}s and were DROPPED "
+              f"(on_late=drop) from {len(bins_hit)} bin(s): {shown}",
+              file=sys.stderr)
     if flow_stats:
         files = flow_stats["flow_files"]
         shown = ", ".join(files if len(files) <= 4
@@ -496,8 +508,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"offset    : not measured ({offset.get('reason')})")
     err = apply_block.get("max_error_sec")
-    err_note = (f"worst-case error {err:.6f}s"
-                if isinstance(err, (int, float)) else "worst-case error unknown")
+    err_note = (f"worst-case error {err:.6f}s" if isinstance(
+        err, (int, float)) else "worst-case error unknown")
     if args.apply_offset:
         apply_note = f"applied {apply_sec:+.6f}s ({err_note})"
     elif apply_block.get("eligible"):

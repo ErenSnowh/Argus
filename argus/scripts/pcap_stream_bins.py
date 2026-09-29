@@ -46,11 +46,15 @@ Guarantees:
   * clock offset is a FEASIBLE INTERVAL, not a median: under floor
     quantization a matched pair proves only delta <= theta + q_flow, so the
     observed statistics (whose median is biased low - reported, never applied)
-    are kept separate from the apply decision. --apply-offset FAILS with exit
-    1 when the offset was not measured, matched too few connection instances,
-    has undetermined precision on either input, or leaves an interval that is
-    empty or wider than OFFSET_MAX_INTERVAL_WIDTH_SEC; it never silently
-    applies 0, and when it does apply it reports the worst-case error.
+    are kept separate from the apply decision. The interval is built from the
+    MAJORITY WINDOW - the largest set of deltas one offset could explain - and
+    the pairs outside it are counted in observed_delta.n_inconsistent; over
+    OFFSET_MAX_INCONSISTENT_FRACTION of them is a refusal of its own.
+    --apply-offset FAILS with exit 1 when the offset was not measured, matched
+    too few connection instances, has undetermined precision on either input,
+    is inconsistent beyond that tolerance, or leaves an interval that is empty
+    or wider than OFFSET_MAX_INTERVAL_WIDTH_SEC; it never silently applies 0,
+    and when it does apply it reports the worst-case error.
 
 Exit status: 0 on success, 1 on error (including a refused --apply-offset).
 """
@@ -293,9 +297,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, default=None,
                     help="output JSON (default: <pcap>_bins.json)")
     ap.add_argument("--apply-offset", action="store_true",
-                    help="shift PCAP timestamps by the MEASURED median "
-                         "clock offset before binning (requires --flows; "
-                         "refused with exit 1 unless the offset is eligible)")
+                    help="shift PCAP timestamps by the midpoint of the "
+                         "MEASURED feasible clock-offset interval before "
+                         "binning (requires --flows; refused with exit 1 "
+                         "unless the offset is eligible)")
     ap.add_argument("--on-backwards", choices=("fail", "merge"),
                     default="fail",
                     help="packet whose target bin already closed: 'fail' "
@@ -474,6 +479,8 @@ def main(argv: list[str] | None = None) -> int:
         q_pcap = obs["packet_timestamp_precision"]["quantization_sec"]
         biased = obs["median_sec_biased_under_quantization"]
         print(f"offset    : measured n={offset['n_matched_pairs']} "
+              f"consistent={obs['n_consistent']} "
+              f"inconsistent={obs['n_inconsistent']} "
               f"delta=[{obs['min_sec']:+.3f},{obs['max_sec']:+.3f}]s "
               f"median(biased)={biased:+.3f}s")
         print(f"          : q_flow={q_flow}s q_pcap={q_pcap}s "
@@ -482,7 +489,8 @@ def main(argv: list[str] | None = None) -> int:
             state = "EMPTY" if interval["empty"] else "feasible"
             print(f"interval  : [{interval['lo_sec']:+.6f}, "
                   f"{interval['hi_sec']:+.6f}) {state} "
-                  f"width={interval['width_sec']:.6f}s")
+                  f"width={interval['width_sec']:.6f}s "
+                  f"(from {interval.get('n_pairs_used')} consistent pairs)")
         else:
             print(f"interval  : not computable ({interval.get('reason')})")
     else:

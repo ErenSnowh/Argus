@@ -624,7 +624,7 @@ def _floor_to(value, step):
 
 
 def _offset_scenario(tmp_path, *, q_flow, theta, step, n=40, q_pkt=0.001,
-                     name="offset.pcap", base=BASE + 10.0):
+                     name="offset.pcap", base=BASE + 10.0, outliers=()):
     """Build a PCAP + flow rows for one (q_flow, q_pkt, theta) scenario.
 
     Connection i's first packet sits at true time ``t_i`` as recorded by a
@@ -634,8 +634,15 @@ def _offset_scenario(tmp_path, *, q_flow, theta, step, n=40, q_pkt=0.001,
     interval must contain ``theta`` - and its midpoint must be closer to
     ``theta`` than the sample median ever is.
 
+    ``outliers`` is a sequence of ``(index, extra_sec)`` pairs that push the
+    flow row of connection ``index`` ``extra_sec`` seconds off. Those are real
+    rows on real 5-tuples, so they still match and still produce a delta - they
+    are exactly what a stepped clock, a DST jump or a mis-paired connection
+    looks like from the estimator's side.
+
     Returns ``(pcap_path, flow_rows, true_times)``.
     """
+    shifted = dict(outliers)
     p = tmp_path / name
     trues = [base + i * step for i in range(n)]
     pkts, rows = [], []
@@ -645,7 +652,7 @@ def _offset_scenario(tmp_path, *, q_flow, theta, step, n=40, q_pkt=0.001,
         pkts.append(pkt)
         rows.append({"src": "10.0.0.1", "dst": "10.0.0.2",
                      "sport": 44000 + i, "dport": 80, "proto": "tcp",
-                     "ts": _floor_to(t + theta, q_flow)})
+                     "ts": _floor_to(t + theta + shifted.get(i, 0.0), q_flow)})
     wrpcap(str(p), pkts)
     return p, rows, trues
 
@@ -723,6 +730,95 @@ def test_offset_interval_contains_theta_and_width_decides_application(
         assert ap["correction_sec"] is None  # never applied, never silently 0
         assert interval["width_sec"] > 0.1
         assert "refusing to apply" in ap["reason"]
+
+
+# A step of 15.7 ms: every pass through the 1 s quantization cell lands 4.8 ms
+# later, so a few hundred pairs walk the whole cell and pin the feasible
+# interval to a few milliseconds. That makes an outlier's effect on it visible
+# instead of buried in quantization slack.
+_DENSE_STEP = 0.0157
+_DENSE_N = 600
+
+_OUTLIER_MATRIX = [
+    # (outliers out of 600 pairs, expected eligible). 3 % is inside the 5 %
+    # tolerance and must not move the answer; 10 % is not and must refuse.
+    (18, True),
+    (60, False),
+]
+
+
+@pytest.mark.parametrize(
+    "n_out,eligible", _OUTLIER_MATRIX,
+    ids=[f"{m[0] * 100 // _DENSE_N}pct-outliers" for m in _OUTLIER_MATRIX])
+def test_outlier_deltas_are_counted_not_averaged_and_capped(
+        tmp_path, n_out, eligible):
+    """A minority of wrong pairs cannot move the correction, a bigger one can.
+
+    Both scenarios carry the same honest pairs under a planted offset
+    ``THETA`` (582 and 540 of them) plus outliers pointing both ways (+600 s, a
+    clock stepped by hand; -45 s, a mis-paired connection). The outliers are
+    visible in the reported spread, invisible to the interval, and the deciding
+    rule is the fraction of them - not a trimmed mean, not a median.
+    """
+    outliers = [(int(_DENSE_N * (j + 1) / (n_out + 1)),
+                 600.0 if j % 2 == 0 else -45.0) for j in range(n_out)]
+    pcap, rows, _ = _offset_scenario(
+        tmp_path, q_flow=1.0, q_pkt=0.001, theta=THETA, step=_DENSE_STEP,
+        n=_DENSE_N, name=f"outliers-{n_out}.pcap", outliers=outliers)
+    off = measure_clock_offset(pcap, rows)
+    obs = off["observed_delta"]
+    interval = obs["feasible_interval"]
+    ap = off["apply"]
+
+    assert off["status"] == "measured"
+    assert off["n_matched_pairs"] == _DENSE_N
+    # every outlier was seen, none of them was believed
+    assert obs["n_inconsistent"] == n_out
+    assert obs["n_consistent"] == _DENSE_N - n_out
+    assert obs["min_sec"] < THETA - 40.0        # the -45 s pairs are reported
+    assert obs["max_sec"] > THETA + 500.0       # and the +600 s pairs
+    assert obs["consistent_min_sec"] > THETA - 1.01
+    assert obs["consistent_max_sec"] < THETA + 0.01
+    # ... but they do not reach the interval the decision is made on
+    assert interval["n_pairs_used"] == _DENSE_N - n_out
+    assert interval["n_pairs_total"] == _DENSE_N
+    assert interval["lo_sec"] <= THETA + TOL
+    assert interval["hi_sec"] > THETA - TOL
+    assert interval["width_sec"] <= 0.1
+    assert ap["n_inconsistent"] == n_out
+
+    assert ap["eligible"] is eligible
+    if eligible:
+        # decision B: applied within 0.05 s of the planted offset
+        assert abs(ap["correction_sec"] - THETA) <= 0.05
+        assert ap["reason"] is None
+    else:
+        assert ap["correction_sec"] is None
+        assert "inconsistent" in ap["reason"]
+        assert "inconsistent_pairs" in ap["flags"]
+
+
+def test_inconsistent_pair_tolerance_is_inclusive_at_the_bound(tmp_path):
+    """Exactly 5 % inconsistent is tolerated; one pair more is not.
+
+    The rule is ``n_inconsistent <= 0.05 * n``, so the boundary itself must be
+    on the eligible side - a tolerance that refuses its own documented bound
+    would be a rule nobody can satisfy.
+    """
+    n = 120   # 5 % is exactly 6 pairs; 120 pairs also walk the whole 1 s cell
+    for n_out, eligible in ((6, True), (7, False)):
+        pcap, rows, _ = _offset_scenario(
+            tmp_path, q_flow=1.0, q_pkt=0.001, theta=THETA, step=_DENSE_STEP,
+            n=n, name=f"bound-{n_out}.pcap",
+            outliers=[(17 * (j + 1), 600.0) for j in range(n_out)])
+        off = measure_clock_offset(pcap, rows)
+        obs, ap = off["observed_delta"], off["apply"]
+        assert obs["n_inconsistent"] == n_out
+        assert ap["eligible"] is eligible, ap["reason"]
+        if eligible:
+            assert abs(ap["correction_sec"] - THETA) <= 0.05
+        else:
+            assert "inconsistent" in ap["reason"]
 
 
 def test_minute_precision_is_pinnable_only_by_dense_sampling(tmp_path):
@@ -817,17 +913,59 @@ def test_offset_apply_refused_when_too_few_matches(tmp_path):
     assert "too few" in off["apply"]["reason"]
 
 
-def test_offset_apply_refused_when_the_interval_is_empty(tmp_path):
-    """One pair that cannot share the offset must refuse, not average."""
+def test_one_contradictory_pair_is_excluded_not_averaged_into_the_interval(
+        tmp_path):
+    """A single mis-paired instance cannot widen the interval or stop it.
+
+    The pre-item-2 behaviour was to build the interval from every pair: one
+    mismatched row then made ``lo > hi``, the interval came back empty and the
+    whole measurement was refused. Fail-closed, but it also let one junk row
+    deny the join for a 200-pair capture. The bad pair is now named
+    (``n_inconsistent``), held out of the interval, and the honest pairs still
+    answer the question. The contradiction rule itself did not go anywhere - it
+    lives on in :func:`feasible_offset_interval` (see
+    ``test_feasible_interval_is_the_intersection_of_per_pair_bounds``) and in
+    the bimodal case below.
+    """
     pcap, rows, _ = _offset_scenario(
-        tmp_path, q_flow=1.0, q_pkt=0.001, theta=THETA, step=0.01, n=25)
-    rows[7]["ts"] += 30.0  # a mismatched instance, or a clock that drifted
+        tmp_path, q_flow=1.0, q_pkt=0.001, theta=THETA, step=_DENSE_STEP,
+        n=_DENSE_N, name="one-bad.pcap")
+    rows[7]["ts"] += 30.0   # a mismatched instance, or a clock that drifted
     off = measure_clock_offset(pcap, rows)
-    interval = off["observed_delta"]["feasible_interval"]
-    assert interval["computable"] is True and interval["empty"] is True
-    assert off["apply"]["eligible"] is False
-    assert "empty feasible interval" in off["apply"]["reason"]
-    assert off["apply"]["correction_sec"] is None
+    obs = off["observed_delta"]
+    interval = obs["feasible_interval"]
+
+    assert obs["n_inconsistent"] == 1
+    assert obs["n_consistent"] == _DENSE_N - 1
+    assert interval["empty"] is False
+    assert interval["n_pairs_used"] == _DENSE_N - 1
+    assert interval["lo_sec"] <= THETA + TOL
+    assert interval["hi_sec"] > THETA - TOL
+    assert off["apply"]["eligible"] is True
+    assert abs(off["apply"]["correction_sec"] - THETA) <= 0.05
+
+
+def test_two_offset_populations_are_refused_as_inconsistent(tmp_path):
+    """A contradicted constant offset still refuses; it is never averaged.
+
+    Half the pairs say the flow clock runs ``THETA`` ahead, half say ``THETA +
+    120`` - two populations, no single offset. The midpoint of the two would be
+    wrong for every pair, so the answer must be a refusal that names the
+    inconsistency and applies nothing.
+    """
+    pcap, rows, _ = _offset_scenario(
+        tmp_path, q_flow=1.0, q_pkt=0.001, theta=THETA, step=_DENSE_STEP,
+        n=_DENSE_N, name="bimodal.pcap")
+    for row in rows[::2]:
+        row["ts"] += 120.0
+    off = measure_clock_offset(pcap, rows)
+    obs, ap = off["observed_delta"], off["apply"]
+
+    assert obs["n_inconsistent"] >= _DENSE_N // 2 - 1
+    assert ap["eligible"] is False
+    assert ap["correction_sec"] is None      # never the midpoint of two groups
+    assert "inconsistent" in ap["reason"]
+    assert "inconsistent_pairs" in ap["flags"]
 
 
 def test_offset_flags_timezone_scale_without_correcting_it(tmp_path):

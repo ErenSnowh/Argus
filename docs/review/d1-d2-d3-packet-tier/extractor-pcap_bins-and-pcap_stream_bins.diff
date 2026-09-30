@@ -1,9 +1,9 @@
 diff --git a/argus/ml/world_model/pcap_bins.py b/argus/ml/world_model/pcap_bins.py
 new file mode 100644
-index 0000000..3ecfaaf
+index 0000000..3a6d104
 --- /dev/null
 +++ b/argus/ml/world_model/pcap_bins.py
-@@ -0,0 +1,1270 @@
+@@ -0,0 +1,1300 @@
 +"""
 +pcap_bins.py
 +------------
@@ -171,16 +171,20 @@ index 0000000..3ecfaaf
 +        "sequence-regression detector, NOT a retransmission count: counts TCP "
 +        "segments whose entire sequence range was already observed on that "
 +        "directional 5-tuple inside this bin (duplicate byte ranges). RST "
-+        "packets and pure ACKs are never counted; in-window reordering and "
-+        "gap-filling are never counted. The column name is fixed by "
-+        "PACKET_LEVEL_COLUMNS, the semantics are not"),
++        "packets, pure ACKs and 1-byte keep-alive / window probes are "
++        "never counted; in-window reordering and gap-filling are never "
++        "counted. A probe is a single sequence number that ends exactly "
++        "where observed sequence space ends (seq = SND.NXT - 1): the "
++        "keep-alive signature, carrying no application data. The column "
++        "name is fixed by PACKET_LEVEL_COLUMNS, the semantics are not"),
 +}
 +
 +APPROXIMATIONS = [
 +    "retransmission_count is a sequence-regression detector: a within-bin, "
-+    "per-direction duplicate-byte-range count (RST packets and pure ACKs are "
-+    "never counted, in-window reordering is never counted). It is not a "
-+    "retransmission count, and full TCP stream reassembly is not performed",
++    "per-direction duplicate-byte-range count (RST packets, pure ACKs and "
++    "1-byte keep-alive / window probes are never counted, in-window "
++    "reordering is never counted). It is not a retransmission count, and "
++    "full TCP stream reassembly is not performed",
 +    "forward/backward directionality is not resolved from the raw capture; "
 +    "statistics are over the packets the keyed host emitted in the bin",
 +    "payload_size is the transport payload for TCP/UDP, the L3 payload "
@@ -343,6 +347,7 @@ index 0000000..3ecfaaf
 +        "src_ip", "bin_start", "packet_count", "byte_count",
 +        "first_pkt_ts", "last_pkt_ts", "_ttl", "_window",
 +        "_payload", "frag_count", "dup_range_count", "seq_ranges_capped",
++        "keep_alive_probes_skipped",
 +        "_ranges",
 +    )
 +
@@ -362,6 +367,9 @@ index 0000000..3ecfaaf
 +        # FEATURE_SEMANTICS: it is never presented as a retransmission count
 +        self.dup_range_count = 0
 +        self.seq_ranges_capped = 0
++        # keep-alive / window probes the duplicate-range check skipped:
++        # counted, so the exemption is reported and never silent
++        self.keep_alive_probes_skipped = 0
 +        # directional 5-tuple -> merged observed (start, end) sequence ranges
 +        self._ranges: dict[FiveTuple, list[list[int]]] = {}
 +
@@ -377,7 +385,17 @@ index 0000000..3ecfaaf
 +        * in-window reordering - a segment that arrives *before* earlier data
 +          and the earlier data arriving afterwards are two distinct ranges, so
 +          seq 1000, 1020, then 1010 is zero duplicates (the old
-+          "seq < highest end seen" rule called that one retransmission).
++          "seq < highest end seen" rule called that one retransmission);
++        * 1-byte keep-alives and window probes: a keep-alive is sent at
++          ``seq = SND.NXT - 1``, so it repeats exactly one sequence
++          number already sent and ends precisely where the observed run
++          ends. It carries no application data, and an idle connection
++          that keeps itself alive must not read as a sequence
++          regression. Such a segment is skipped and counted in
++          ``keep_alive_probes_skipped``. The disclosed cost: a genuine
++          one-byte retransmission sitting exactly at the edge of the
++          observed run is indistinguishable from a probe and is not
++          counted either.
 +        """
 +        if int(tcp.flags) & 0x04:  # RST: a reset, never a regression
 +            return
@@ -392,6 +410,12 @@ index 0000000..3ecfaaf
 +        end = (seq + length) & 0xFFFFFFFF
 +        ranges = self._ranges.setdefault(key, [])
 +        if _range_covered(ranges, seq, end):
++            if length == 1 and any(hi == end for _, hi in ranges):
++                # keep-alive / window probe (seq = SND.NXT - 1): one
++                # sequence number, ending at the edge of the observed
++                # run. Skipped as a duplicate, counted as a probe.
++                self.keep_alive_probes_skipped += 1
++                return
 +            self.dup_range_count += 1
 +            return
 +        if _range_insert(ranges, seq, end) > SEQ_RANGES_CAP:
@@ -526,6 +550,7 @@ index 0000000..3ecfaaf
 +    late_dropped = 0
 +    late_bins: set[FlowKey] = set()
 +    ranges_capped_total = 0
++    keep_alives_skipped_total = 0
 +    peak_retained = 0
 +    first_ts: Optional[float] = None
 +    last_ts: Optional[float] = None
@@ -534,8 +559,9 @@ index 0000000..3ecfaaf
 +
 +    def _release(acc: _BinAccumulator) -> None:
 +        """Finalise an accumulator: emit its record, free its state."""
-+        nonlocal ranges_capped_total
++        nonlocal ranges_capped_total, keep_alives_skipped_total
 +        ranges_capped_total += acc.seq_ranges_capped
++        keep_alives_skipped_total += acc.keep_alive_probes_skipped
 +        flushed.append(acc.record())
 +
 +    def _close_past(t: float) -> None:
@@ -636,6 +662,7 @@ index 0000000..3ecfaaf
 +            "peak_retained_bins": peak_retained,
 +            "watermark_scans": watermark_scans,
 +            "seq_range_sets_capped": ranges_capped_total,
++            "tcp_keep_alive_probes_skipped": keep_alives_skipped_total,
 +            "bin_seconds": bin_seconds,
 +            "bin_key": "(src_ip, floor(unix_seconds / bin_seconds) * "
 +                       "bin_seconds)",
@@ -935,10 +962,13 @@ index 0000000..3ecfaaf
 +    One matched pair therefore proves only that ``delta`` lies in
 +    ``(theta - q_flow, theta + q_packet]``, i.e. that ``theta`` lies in
 +    ``[delta - q_packet, delta + q_flow)``. Averaging or taking the median of
-+    such deltas is biased low by the mean sub-step ``frac`` (which is why the
-+    old "median = measured offset" reading produced +7.0 s for a +7.34 s
-+    offset). This function first drops the pairs no single offset could explain
-+    and then intersects the per-pair constraints::
++    such deltas is biased low by the mean sub-step ``frac`` - measured, not
++    hypothetical: on the CLI smoke fixture (second-precision flow column,
++    +2.000 s planted, 200 consistent pairs) the median read +1.220 s, a
++    0.780 s shortfall equal to the deltas' mean sub-step, and review
++    round 1 applied that number as the offset. This function first drops
++    the pairs no single offset could explain and then intersects the
++    per-pair constraints::
 +
 +        lo = max(consistent delta) - q_packet,   hi = min(...) + q_flow
 +
@@ -1276,10 +1306,10 @@ index 0000000..3ecfaaf
 +
 diff --git a/argus/scripts/pcap_stream_bins.py b/argus/scripts/pcap_stream_bins.py
 new file mode 100644
-index 0000000..ddf489b
+index 0000000..49d5811
 --- /dev/null
 +++ b/argus/scripts/pcap_stream_bins.py
-@@ -0,0 +1,536 @@
+@@ -0,0 +1,537 @@
 +#!/usr/bin/env python3
 +"""
 +pcap_stream_bins.py
@@ -1309,8 +1339,9 @@ index 0000000..ddf489b
 +    retained memory stays bounded at bin_seconds + grace of capture time, never
 +    tracking capture length;
 +  * retransmission_count is a SEQUENCE-REGRESSION detector (duplicate byte
-+    ranges per directional 5-tuple): RST and pure ACKs are never counted and
-+    in-window reordering is never counted. The column name comes from
++    ranges per directional 5-tuple): RST, pure ACKs and 1-byte keep-alive /
++    window probes are never counted, and in-window reordering is never
++    counted. The column name comes from
 +    PACKET_LEVEL_COLUMNS; output carries feature_semantics saying what it
 +    measures, because it is not a retransmission count;
 +  * --flows accepts multiple parquet/csv files AND directories (expanded to

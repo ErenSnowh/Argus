@@ -3,8 +3,10 @@
 Branch `review/d1-d2-d3-packet-tier`, in order: `b36148c` (code), `a61ed27`
 (bundle), `e107158` (round-1 fixes), `505b0b2` (hash note), `f812408` (round 2),
 `21b6fd1` (merge of `origin/main`), `496821c` + `1bebbd0` + `f267565` +
-`158c0c2` (round 3), `c4d81d4` (bundle refreshed for rounds 2 and 3), `c72de6e`
-(item 1 of round 4: plan card E). A commit cannot list its own hash, so the
+`158c0c2` (round 3), `c4d81d4` (bundle refreshed for rounds 2 and 3), `c72de6e` + `907c15e` +
+this commit (round 4: plan card E, the bundle itself, then the probe guard and
+the re-smoke becoming a test).
+A commit cannot list its own hash, so the
 authority for "what is on the branch" is
 `git log --oneline main..HEAD` - review the branch tip. Base `main` =
 `c53652f`, with `origin/main` `eda53c4` merged in; that merge touches none of the
@@ -56,16 +58,18 @@ git diff main -- argus/ml/world_model/features.py argus/dashboard/app.py
 ## 2. Exact code and test diffs
 
 * `extractor-pcap_bins-and-pcap_stream_bins.diff` - both files are **new** (`new file mode 100644`):
-  * `argus/ml/world_model/pcap_bins.py` (1270 lines): `bin_start_for`, `BackwardsTimestampError`, `_OnlineStats` (O(1) Welford count/mean/variance), `_BinAccumulator` (per-direction merged sequence ranges, `dup_range_count`, `SEQ_RANGES_CAP`), `_range_covered` / `_range_insert`, `extract_pcap_bins` (streams `PcapReader`; exactly one record per `(src_ip, bin_start)`; closes bins on a watermark scan run at bin boundaries; `on_late="fail"` raises, `on_late="drop"` counts the loss per bin; retained memory is `bin_seconds + reorder_grace_sec` and closed bins are freed), `_is_closed`, `_PrecisionCounter` / `infer_timestamp_quantization` (each source's step *determined* from its own values), `feasible_offset_interval`, `_majority_consensus_window` (largest set of deltas one offset can explain, two pointers, O(n)), `measure_clock_offset` (protocol-aware, per-connection-instance matching; `observed_delta` reported separately from a guarded `apply` decision), `measure_bin_coverage` (unique host-minute bins, null on an empty denominator), `join_packet_features`, `unsupported_or_null`.
-  * `argus/scripts/pcap_stream_bins.py` (536 lines): the CLI (`--pcap`, `--flows` - many files *and* directories at once, `--bin-seconds`, `--out`, `--apply-offset`, `--on-late {fail,drop}`, `--reorder-grace-sec`) plus the flow-table layer `_find_col`, `_cell_str`, `_norm_proto`, `load_flow_rows`, `resolve_flow_paths`, `load_flow_tables`. Two things refuse rather than proceed, and both **exit 1 with no output file at all**: a refused `--apply-offset` (needs `--flows` *and* an eligible measurement) and a late packet under the default `--on-late fail`.
-* `tests-test_pcap_bins.diff` - `argus/tests/test_pcap_bins.py` (**new**), **64 tests**, grouped in the file by section header - the section is the useful grouping, since a test's "round" says less than what it pins: fixed bins keyed like D1; RST never a retransmission and the demo path's own disclosure (round 3 adds `test_demo_path_is_a_sequence_regression_proxy_and_says_so`, which runs one capture through both estimators: 1 for the demo proxy, 0 for the streaming detector); no zero-fill; offset measured vs `not_measured`; coverage percentages; the `PcapReader`-never-`rdpcap` guard; the pandas `us`/`ns` epoch regression; **late packets fail closed** (`test_late_packet_fails_closed_and_names_both_remedies`, `test_late_packet_is_dropped_and_counted_only_when_requested`, `test_reorder_grace_keeps_a_recent_bin_open_without_failing`, `test_invalid_late_policy_and_grace_are_rejected`); **reordering is memory-bounded** (`test_default_late_policy_fails_and_grace_is_bounded`, `test_late_burst_for_one_bin_is_counted_once_per_bin`, `test_hours_late_packet_never_keeps_an_old_bin_alive`, `test_retained_bins_do_not_grow_with_capture_length`); watermark scans scale with bins; **timestamp precision determined, never assumed** (incl. `test_feasible_interval_is_the_intersection_of_per_pair_bounds`); **the duplicate-range detector and the semantics it reports** (incl. `test_in_window_reordering_is_not_a_sequence_regression`, `test_out_of_order_range_memory_is_capped`, `test_packet_tier_has_no_training_or_benchmark_consumer_yet`); **feasible-interval offset and guarded apply** (incl. `test_outlier_deltas_are_counted_not_averaged_and_capped`, `test_inconsistent_pair_tolerance_is_inclusive_at_the_bound`, `test_one_contradictory_pair_is_excluded_not_averaged_into_the_interval`, `test_two_offset_populations_are_refused_as_inconsistent`, `test_minute_precision_is_pinnable_only_by_dense_sampling`); flow-table null / multi-file loading; and six CLI end-to-end tests (`test_cli_applies_measured_offset_so_flow_bins_join`, `test_cli_refuses_apply_offset_and_writes_no_output`, `test_cli_all_benign_flow_table_reports_null_attack_coverage`, `test_cli_late_packet_exits_1_until_drop_is_requested`, `test_cli_widening_the_grace_absorbs_the_reordering`, `test_cli_rejects_bad_arguments`).
+  * `argus/ml/world_model/pcap_bins.py`: `bin_start_for`, `BackwardsTimestampError`, `_OnlineStats` (O(1) Welford count/mean/variance), `_BinAccumulator` (per-direction merged sequence ranges, `dup_range_count`, `SEQ_RANGES_CAP`, and a 1-byte keep-alive / window probe that is skipped as a duplicate and counted in `keep_alive_probes_skipped` - round 4), `_range_covered` / `_range_insert`, `extract_pcap_bins` (streams `PcapReader`; exactly one record per `(src_ip, bin_start)`; closes bins on a watermark scan run at bin boundaries; `on_late="fail"` raises, `on_late="drop"` counts the loss per bin; retained memory is `bin_seconds + reorder_grace_sec` and closed bins are freed), `_is_closed`, `_PrecisionCounter` / `infer_timestamp_quantization` (each source's step *determined* from its own values), `feasible_offset_interval`, `_majority_consensus_window` (largest set of deltas one offset can explain, two pointers, O(n)), `measure_clock_offset` (protocol-aware, per-connection-instance matching; `observed_delta` reported separately from a guarded `apply` decision), `measure_bin_coverage` (unique host-minute bins, null on an empty denominator), `join_packet_features`, `unsupported_or_null`.
+  * `argus/scripts/pcap_stream_bins.py`: the CLI (`--pcap`, `--flows` - many files *and* directories at once, `--bin-seconds`, `--out`, `--apply-offset`, `--on-late {fail,drop}`, `--reorder-grace-sec`) plus the flow-table layer `_find_col`, `_cell_str`, `_norm_proto`, `load_flow_rows`, `resolve_flow_paths`, `load_flow_tables`. Two things refuse rather than proceed, and both **exit 1 with no output file at all**: a refused `--apply-offset` (needs `--flows` *and* an eligible measurement) and a late packet under the default `--on-late fail`.
+* `tests-test_pcap_bins.diff` - `argus/tests/test_pcap_bins.py` (**new**), **66 tests** (count verified
+with `pytest tests/test_pcap_bins.py --collect-only -q | tail -1`), grouped in the file by section header - the section is the useful grouping, since a test's "round" says less than what it pins: fixed bins keyed like D1; RST never a retransmission and the demo path's own disclosure (round 3 adds `test_demo_path_is_a_sequence_regression_proxy_and_says_so`, which runs one capture through both estimators: 1 for the demo proxy, 0 for the streaming detector); no zero-fill; offset measured vs `not_measured`; coverage percentages; the `PcapReader`-never-`rdpcap` guard; the pandas `us`/`ns` epoch regression; **late packets fail closed** (`test_late_packet_fails_closed_and_names_both_remedies`, `test_late_packet_is_dropped_and_counted_only_when_requested`, `test_reorder_grace_keeps_a_recent_bin_open_without_failing`, `test_invalid_late_policy_and_grace_are_rejected`); **reordering is memory-bounded** (`test_default_late_policy_fails_and_grace_is_bounded`, `test_late_burst_for_one_bin_is_counted_once_per_bin`, `test_hours_late_packet_never_keeps_an_old_bin_alive`, `test_retained_bins_do_not_grow_with_capture_length`); watermark scans scale with bins; **timestamp precision determined, never assumed** (incl. `test_feasible_interval_is_the_intersection_of_per_pair_bounds`); **the duplicate-range detector and the semantics it reports** (incl. `test_one_byte_keep_alive_is_not_a_duplicate`, `test_in_window_reordering_is_not_a_sequence_regression`, `test_out_of_order_range_memory_is_capped`, `test_packet_tier_has_no_training_or_benchmark_consumer_yet`); **feasible-interval offset and guarded apply** (incl. `test_outlier_deltas_are_counted_not_averaged_and_capped`, `test_inconsistent_pair_tolerance_is_inclusive_at_the_bound`, `test_one_contradictory_pair_is_excluded_not_averaged_into_the_interval`, `test_two_offset_populations_are_refused_as_inconsistent`, `test_minute_precision_is_pinnable_only_by_dense_sampling`,
+`test_sample_portscan_planted_offset_is_refused_at_second_precision`); flow-table null / multi-file loading; and six CLI end-to-end tests (`test_cli_applies_measured_offset_so_flow_bins_join`, `test_cli_refuses_apply_offset_and_writes_no_output`, `test_cli_all_benign_flow_table_reports_null_attack_coverage`, `test_cli_late_packet_exits_1_until_drop_is_requested`, `test_cli_widening_the_grace_absorbs_the_reordering`, `test_cli_rejects_bad_arguments`).
 * `consumers-features-and-dashboard.diff` - the two demo-path consumers that describe `retransmission_count` (`ml/world_model/features.py` docstring + inline heuristic comment; `dashboard/app.py`'s `approximations` entry), so the UI cannot imply the streaming extractor's semantics.
 
-Verification run on 2026-09-29 (round 3): `pytest argus/tests/test_pcap_bins.py` -> **64 passed**; full suite -> **119 passed, 4 skipped**.
+Verification runs: 2026-09-29 round 3 -> `pytest argus/tests/test_pcap_bins.py` **64 passed**, full suite **119 passed, 4 skipped**; 2026-09-30 round 4 (probe guard + fixture re-smoke test) -> **66 passed**, full suite **121 passed, 4 skipped** (skips, `pytest -rs`: 3 x PyTorch not installed, 1 x antivirus blocked the EICAR fixture).
 
 ## 3. Timestamp-to-epoch conversion code
 
-`argus/scripts/pcap_stream_bins.py:123-211` (`load_flow_rows`) - round-1 version,
+`argus/scripts/pcap_stream_bins.py:124-212` (`load_flow_rows`) - round-1 version,
 the null accounting is the addition, the epoch maths is unchanged apart from the
 single-pass index map:
 
@@ -128,7 +132,7 @@ Notes:
 * **The `"nan"` string bug**: the old `str(r[col] or "")` turned a float NaN
   into the literal string `"nan"` (NaN is truthy), which then polluted join
   keys and labels. Every cell now goes through `_cell_str`
-  (`pcap_stream_bins.py:97-111`), which maps `None`/NaN/NA/empty/`"nan"`/
+  (`pcap_stream_bins.py:98-112`), which maps `None`/NaN/NA/empty/`"nan"`/
   `"none"`/`"nat"` to `None`, and a row without a real IP or port is dropped
   and counted in `rows_dropped_missing_identity` instead of being joined on a
   fabricated key. Pinned by
@@ -152,7 +156,7 @@ Notes:
 
 ## 4. Why the round-1 median read +1.220 s for a +2.000 s plant, and what is applied now
 
-**Sign convention.** `measure_clock_offset` (`pcap_bins.py:891-1196`) computes,
+**Sign convention.** `measure_clock_offset` (`pcap_bins.py:918-1226`) computes,
 for every protocol-aware directional 5-tuple present in both sources - paired
 **per connection instance**, not per tuple - the delta
 
@@ -251,9 +255,9 @@ walks the tree and fails if any file but the CLI and these tests imports
    * flow side - `load_flow_tables` / `load_flow_rows` parse each table's
      `Timestamp` into unix seconds, then `main()` computes
      `flow_keys = [(r["src"], bin_start_for(r["ts"], args.bin_seconds))]`
-     (`pcap_stream_bins.py:380-381`);
+     (`pcap_stream_bins.py:381-382`);
    * PCAP side - `extract_pcap_bins` keys every packet
-     `key = (ip.src, bin_start_for(ts, bin_seconds))` (`pcap_bins.py:567`);
+     `key = (ip.src, bin_start_for(ts, bin_seconds))` (`pcap_bins.py:593`);
      `bin_start_for = floor(ts / bin_seconds) * bin_seconds`.
    * D1's own plan text now states the same formula (`world-model-core.md`
      D1 Decision amendment), so the contract is written down, not implied.
@@ -381,7 +385,7 @@ CIC PCAP offset and coverage are still **not yet measured**.
 
 | Finding | Fix | Pinned by |
 |---|---|---|
-| The retransmission proxy counted honest reordering ("seq below the highest end seen" - seq 1000, 1020, 1010 scored 1 retransmission) and needed unbounded history to be right | a bin keeps one **merged sequence-range set per directional 5-tuple** and counts only a segment whose **whole byte range was already observed**; RST and pure ACKs never counted; memory bounded at `SEQ_RANGES_CAP = 64` merged ranges with overflow dropped and counted in `seq_range_sets_capped` | `test_in_window_reordering_is_not_a_sequence_regression`, `test_duplicate_byte_range_is_a_sequence_regression`, `test_partial_overlap_that_adds_new_bytes_is_not_counted`, `test_keep_alives_are_never_counted`, `test_out_of_order_range_memory_is_capped` |
+| The retransmission proxy counted honest reordering ("seq below the highest end seen" - seq 1000, 1020, 1010 scored 1 retransmission) and needed unbounded history to be right | a bin keeps one **merged sequence-range set per directional 5-tuple** and counts only a segment whose **whole byte range was already observed**; RST and pure ACKs never counted; memory bounded at `SEQ_RANGES_CAP = 64` merged ranges with overflow dropped and counted in `seq_range_sets_capped` | `test_in_window_reordering_is_not_a_sequence_regression`, `test_duplicate_byte_range_is_a_sequence_regression`, `test_partial_overlap_that_adds_new_bytes_is_not_counted`, `test_pure_acks_are_never_counted` (that is round 3's `test_keep_alives_are_never_counted`, renamed in round 4 because a keep-alive is not a pure ACK), `test_out_of_order_range_memory_is_capped` |
 | A 0 s default grace made every slightly-out-of-order capture an error, while a generous grace was an unbounded backlog | `reorder_grace_sec` defaults to **1 s** and is hard-capped at `MAX_REORDER_GRACE_SEC = 300`; `stats.peak_retained_bins` and `stats.watermark_scans` report both bounds instead of asserting them | `test_default_late_policy_fails_and_grace_is_bounded`, `test_invalid_late_policy_and_grace_are_rejected`, `test_retained_bins_do_not_grow_with_capture_length`, `test_watermark_scans_scale_with_bins_not_packets` |
 | Applying the **median** of quantized deltas is biased by up to one quantization step - this very fixture had +1.220 s applied against a +2.0 s truth, and the old IQR guard passed it | per-pair constraint `[delta - q_packet, delta + q_flow)` intersected into the **feasible interval** (`lo = max - q_packet`, `hi = min + q_flow`); apply the **midpoint only when the interval is non-empty and at most `OFFSET_MAX_INTERVAL_WIDTH_SEC = 0.1 s` wide**, reporting `max_error_sec` = half its width; the median is demoted to `median_sec_biased_under_quantization` and is never applied | `test_feasible_interval_is_the_intersection_of_per_pair_bounds`, `test_offset_interval_contains_theta_and_width_decides_application`, `test_minute_precision_is_pinnable_only_by_dense_sampling`, `test_applied_correction_keeps_packet_bins_on_the_flow_bins` |
 | Timestamp precision was assumed where it should be measured | `_PrecisionCounter` determines each source's step (0.001 / 1 / 60 s grids, >= 20 values, counted over values rather than min/max); a *declared* step can never make the estimate more confident than the values allow; an undetermined step blocks application instead of defaulting to 1 s | `test_precision_reads_subsecond_second_and_minute_grids`, `test_precision_stays_unknown_from_too_few_values`, `test_precision_counts_values_not_min_max`, `test_declared_precision_never_beats_the_measured_values`, `test_offset_refused_when_precision_cannot_be_determined` |
@@ -413,12 +417,17 @@ measured**.
 | Risk 6 was written as **resolved** while nothing had been measured on a PCAP | "**Mitigation designed** (two-tier model); **resolved only when** a PCAP source is approved and the `packet_tier` arm has run" | plan Risks; item 6 above |
 | item 4 was titled as if the +1.220 s were a mystery about the planted offset, and argued from "measured == predicted" and a `(P-1, P]` tolerance band - the wrong criterion, since that band passes the very number round 1 wrongly applied | retitled to what happened (the round-1 **median** read +1.220 s for a +2.000 s truth) and **both paragraphs deleted**; the sign/unit-bug facts the deleted paragraph carried are kept, in the place they belong | item 4 above |
 | item 5 asked "is the streaming path *wired into the pipeline*?", which over-sold it | retitled to what a test actually pins: **a standalone extractor, not consumed by any training or benchmark code** (`test_packet_tier_has_no_training_or_benchmark_consumer_yet`), and the "consumer" bullet now says plainly that the cross-references point the *demo* path here | item 5 above |
-| every `file:line` reference and hunk header in this bundle had drifted as the files grew | re-derived from this tip: `pcap_bins.py:567` / `:891-1196`, `pcap_stream_bins.py:97-111` / `:123-211` / `:380-381`, `features.py:510-513`, `dashboard/app.py:693-695`, and all 8 hunk headers in item 1; the `.diff` artifacts regenerated with `git diff --output=` | throughout |
+| a 1-byte keep-alive / window probe sits in already-covered sequence space (`seq = SND.NXT - 1`), so the duplicate-range rule counted it: an idle connection that merely keeps itself alive read as a sequence regression | `_observe_tcp` skips a covered segment that occupies exactly one sequence number and ends at the edge of the observed run, and counts the skip in `keep_alive_probes_skipped` -> `stats.tcp_keep_alive_probes_skipped`, because an exemption that is not reported is a silent one. `FEATURE_SEMANTICS` and `APPROXIMATIONS` now name probes alongside RST and pure ACKs, and the disclosed cost is stated where the rule lives: a genuine one-byte retransmission exactly at that edge is indistinguishable from a probe | `test_one_byte_keep_alive_is_not_a_duplicate` (20 probes -> 0 counted, 20 skipped, all 21 packets still counted; and the exemption stays narrow - a 1-byte duplicate away from the edge is still counted) |
+| `test_keep_alives_are_never_counted` pinned **zero-length ACKs**, which are not keep-alives - a keep-alive carries a sequence number | renamed `test_pure_acks_are_never_counted`, pointing at the new probe test for the case it never covered | `test_pure_acks_are_never_counted`, `test_one_byte_keep_alive_is_not_a_duplicate` |
+| `measure_clock_offset`'s docstring illustrated the median bias with an invented +7.0 s read for a +7.34 s offset, while the number this bundle actually measured was on the tip of the same file | the example is now the measurement: +1.220 s read for a +2.000 s plant over 200 consistent pairs, the 0.780 s shortfall equal to the deltas' mean sub-step - the value round 1 applied | docstring only (item 4 keeps the reasoning) |
+| the status block's re-smoke numbers existed only as prose - nothing failed if the fixture measurement drifted | the claim is now a committed test: it streams `data/sample_portscan.pcap` with `with PcapReader`, builds one row per TCP directional 5-tuple planting +2.0 s at second precision (`floor(t + 2.0)`) and at millisecond precision (`floor((t + 2.0) * 1000) / 1000`), and pins `n_matched_pairs == 200`, `n_inconsistent == 0`, median 1.219773, width 0.948952, `lo <= 2.0 < hi`, the refusal (`eligible is False`, `"wide"` in the reason) - so the refusal is pinned to the width guard - and the ms twin applying within 1 ms; skips loudly if the capture is absent | `test_sample_portscan_planted_offset_is_refused_at_second_precision` (2026-09-30) |
+| every `file:line` reference and hunk header in this bundle had drifted as the files grew | re-derived from this tip: `pcap_bins.py:593` / `:918-1226`, `pcap_stream_bins.py:98-112` / `:124-212` / `:381-382`, `features.py:510-513`, `dashboard/app.py:693-695`, and all 8 hunk headers in item 1; the `.diff` artifacts regenerated with `git diff --output=` | throughout |
 
 ## Status of this bundle
 
-* 64/64 `test_pcap_bins.py`; full suite **119 passed, 4 skipped** (2026-09-29,
-  round 3).
+* 66/66 `test_pcap_bins.py`; full suite **121 passed, 4 skipped**
+  (2026-09-30, round 4; `pytest -rs` skips: 3 x PyTorch not installed,
+  1 x antivirus blocked the EICAR fixture).
 * CLI re-smoked end-to-end on `data/sample_portscan.pcap` against two synthetic
   flow tables built from the capture itself, both planting the same +2.0 s
   offset. The **second-precision** (CIC text format) table measures
@@ -427,9 +436,14 @@ measured**.
   output file** - item 4 explains why that is the correct answer rather than a
   threshold to widen; the same measurement without `--apply-offset` is written
   with the refusal recorded in `clock_offset.apply`, coverage 1/1 bins and
-  1/1 attack bins. The **microsecond** twin pins the interval to 0.002 s and
-  applies +2.000000 s with `max_error_sec = 0.0009998 s`, coverage 1/1 and
-  attack 1/1, all 8 packet columns populated.
+  1/1 attack bins. Two twin figures exist because the row builders differ; each is
+  labeled in place: (CLI smoke, µs-rounded rows: +2.000000 / 0.0009998)
+  pins the interval to 0.002 s, applies, and reports coverage 1/1 and
+  attack 1/1 with all 8 packet columns populated; (test, ms-floored rows:
+  1.999501 / 0.000501) applies within 1 ms of the same +2.000 s plant.
+  Both figures, and the second-precision refusal above, are reproduced by
+  `test_sample_portscan_planted_offset_is_refused_at_second_precision`
+  (pairs are correction_sec / max_error_sec).
 * Late packets re-smoked on the same capture with one packet 7200 s early: the
   default run exits 1 naming ts, bin key, watermark and both remedies and
   writes nothing; `--on-late drop` exits 0 with 1 dropped packet against exactly
@@ -439,7 +453,7 @@ measured**.
   gates (streaming extractor, measured offset, measured coverage) are
   unchanged; PCAP source option (a)/(b)/(c) is still unapproved; no PCAP
   download has happened.
-* Review gate: rounds 1-3 are commits on
+* Review gate: rounds 1-4 are commits on
   `review/d1-d2-d3-packet-tier` (the branch is on `origin`); `origin/main` is
   merged in and touches none of the files under review; nothing merges into
   `main` without approval.

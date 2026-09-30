@@ -27,8 +27,9 @@ Guarantees:
     retained memory stays bounded at bin_seconds + grace of capture time, never
     tracking capture length;
   * retransmission_count is a SEQUENCE-REGRESSION detector (duplicate byte
-    ranges per directional 5-tuple): RST and pure ACKs are never counted and
-    in-window reordering is never counted. The column name comes from
+    ranges per directional 5-tuple): RST, pure ACKs and 1-byte keep-alive /
+    window probes are never counted, and in-window reordering is never
+    counted. The column name comes from
     PACKET_LEVEL_COLUMNS; output carries feature_semantics saying what it
     measures, because it is not a retransmission count;
   * --flows accepts multiple parquet/csv files AND directories (expanded to

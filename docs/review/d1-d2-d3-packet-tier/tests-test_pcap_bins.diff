@@ -1,9 +1,9 @@
 diff --git a/argus/tests/test_pcap_bins.py b/argus/tests/test_pcap_bins.py
 new file mode 100644
-index 0000000..6736cbe
+index 0000000..5951c95
 --- /dev/null
 +++ b/argus/tests/test_pcap_bins.py
-@@ -0,0 +1,1341 @@
+@@ -0,0 +1,1435 @@
 +"""
 +test_pcap_bins.py
 +-----------------
@@ -27,7 +27,7 @@ index 0000000..6736cbe
 +
 +from scapy.layers.inet import IP, TCP, UDP  # noqa: E402
 +from scapy.packet import Raw  # noqa: E402
-+from scapy.utils import wrpcap  # noqa: E402
++from scapy.utils import PcapReader, wrpcap  # noqa: E402
 +
 +from ml.world_model.pcap_bins import (  # noqa: E402
 +    DEFAULT_REORDER_GRACE_SEC,
@@ -621,12 +621,45 @@ index 0000000..6736cbe
 +    assert count == 0.0
 +
 +
-+def test_keep_alives_are_never_counted(tmp_path):
-+    """Fifty repeated zero-length ACKs are the old false-positive family."""
++def test_pure_acks_are_never_counted(tmp_path):
++    """Fifty repeated zero-length ACKs: no sequence space, nothing to tell.
++
++    Named for what these segments are (round 3 called this test
++    "keep_alives", which is a different thing - a keep-alive does carry a
++    sequence number; see
++    :func:`test_one_byte_keep_alive_is_not_a_duplicate`).
++    """
 +    count, _ = _regression(
 +        tmp_path, [(1000, b"x" * 10)] + [(1010, b"") for _ in range(50)],
-+        "keepalive.pcap")
++        "ack.pcap")
 +    assert count == 0.0
++
++
++def test_one_byte_keep_alive_is_not_a_duplicate(tmp_path):
++    """seq = SND.NXT - 1: the keep-alive signature, not a sequence regression.
++
++    A keep-alive / window probe repeats exactly one already-sent sequence
++    number and ends where the observed run ends. The duplicate-range rule
++    before this fix saw a covered range and counted it, so an idle
++    connection that merely keeps itself alive read as retransmission - while
++    carrying no application data at all.
++    """
++    count, result = _regression(
++        tmp_path, [(1000, b"x" * 10)] + [(1009, b"y") for _ in range(20)],
++        "probe.pcap")
++    assert count == 0.0
++    # skipped, and said so: the exemption is a counted decision, never a
++    # silent one
++    assert result["stats"]["tcp_keep_alive_probes_skipped"] == 20
++    # the packets are still packets - skipping the verdict is not dropping
++    # them
++    assert result["records"][0]["packet_count"] == 21
++
++    # and the exemption stays narrow: a 1-byte duplicate that does not sit at
++    # the edge of the observed run is still a duplicate byte range
++    edge, _ = _regression(tmp_path, [(1000, b"x" * 10), (1003, b"y")],
++                          "edge_byte.pcap")
++    assert edge == 1.0
 +
 +
 +def test_out_of_order_range_memory_is_capped(tmp_path):
@@ -1075,6 +1108,67 @@ index 0000000..6736cbe
 +        "proto": "tcp", "ts": BASE + 400.0}])
 +    assert extra["n_matched_pairs"] == 2
 +    assert extra["n_unpaired_instances"] == 1
++
++
++def test_sample_portscan_planted_offset_is_refused_at_second_precision():
++    """The README status-block re-smoke, reproduced on the committed fixture.
++
++    One flow row per TCP directional 5-tuple of ``data/sample_portscan.pcap``
++    (200 of them), each planting the same +2.0 s flow-minus-packet offset the
++    status block describes, built two ways:
++
++    * **second precision** - ``floor(t + 2.0)``, the CIC ``d/m/Y H:M:S`` text
++      format: the feasible interval is ~0.949 s wide, far over the 0.1 s
++      bound, so ``--apply-offset``'s refusal is pinned here as
++      ``eligible is False`` with ``"wide"`` in the reason - and
++      ``n_inconsistent == 0`` pins that refusal to the *width* guard, not the
++      inconsistency guard that is evaluated before it.
++    * **millisecond precision** - ``floor((t + 2.0) * 1000) / 1000``: the
++      finest grid this estimator certifies (``SUPPORTED_QUANTIZATION_SEC``
++      floors at 0.001 s, so ``max_error = width/2 <= 0.001`` is structural),
++      so the midpoint applies and lands within 1 ms of the plant. Not a true
++      microsecond table - the status block's CLI-smoke µs rows report
++      +2.000000 / 0.0009998 from a different builder.
++
++    Skipped, loudly, if the committed capture is absent from the checkout.
++    """
++    pcap = ROOT / "data" / "sample_portscan.pcap"
++    if not pcap.exists():
++        pytest.skip(f"sample capture absent from checkout: {pcap}")
++
++    first_pkt = {}
++    with PcapReader(str(pcap)) as reader:
++        for pkt in reader:
++            if IP in pkt and TCP in pkt:
++                key = (pkt[IP].src, pkt[IP].dst,
++                       int(pkt[TCP].sport), int(pkt[TCP].dport))
++                if key not in first_pkt:      # first packet of the tuple
++                    first_pkt[key] = float(pkt.time)
++
++    def _rows(ts_of):
++        return [{"src": s, "dst": d, "sport": sp, "dport": dp,
++                 "proto": "tcp", "ts": ts_of(t)}
++                for (s, d, sp, dp), t in first_pkt.items()]
++
++    # --- second precision: the refusal must come from the width guard ---
++    sec = measure_clock_offset(pcap, _rows(lambda t: math.floor(t + 2.0)))
++    obs = sec["observed_delta"]
++    iv = obs["feasible_interval"]
++    assert sec["n_matched_pairs"] == 200
++    assert obs["n_inconsistent"] == 0    # width guard, not the one before it
++    assert abs(obs["median_sec_biased_under_quantization"] - 1.219773) < 1e-4
++    assert abs(iv["width_sec"] - 0.948952) < 1e-4
++    assert iv["lo_sec"] <= 2.0 < iv["hi_sec"]
++    assert sec["apply"]["eligible"] is False
++    assert "wide" in sec["apply"]["reason"]
++
++    # --- millisecond precision: pinned, so the midpoint applies ---
++    ms = measure_clock_offset(
++        pcap, _rows(lambda t: math.floor((t + 2.0) * 1000) / 1000))
++    assert ms["n_matched_pairs"] == 200
++    assert ms["apply"]["eligible"] is True
++    assert abs(ms["apply"]["correction_sec"] - 2.0) <= 0.001
++    assert ms["apply"]["max_error_sec"] <= 0.001
 +
 +
 +# --------------------------------------------------------------------------

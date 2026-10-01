@@ -4,7 +4,7 @@
 
 > Built for the **Kaggle 5-Day AI Agents Intensive: Vibe Coding Course with Google** capstone — Track: **Agents for Business** (crossover: Agents for Good — protecting shared digital infrastructure).
 
-[![Tests](https://img.shields.io/badge/tests-163%20collected-brightgreen)]() [![Python](https://img.shields.io/badge/python-3.10%2B-blue)]() [![License](https://img.shields.io/badge/license-MIT-lightgrey)]()
+[![Tests](https://img.shields.io/badge/tests-164%20collected-brightgreen)]() [![Python](https://img.shields.io/badge/python-3.10%2B-blue)]() [![License](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ---
 
@@ -114,7 +114,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-163 tests collected (`pytest --collect-only -q`) covering the detector, MITRE
+164 tests collected (`pytest --collect-only -q`) covering the detector, MITRE
 mapping, IOC enrichment, PCAP forensics, playbook generation, the dashboard's
 API error handling, the CIC-IDS-2017 binning pipeline, packet-bin extraction,
 and every security guardrail (redaction, allowlist enforcement,
@@ -149,7 +149,7 @@ cli/            `argus` Agent Skills CLI (with --live mode)
 dashboard/      FastAPI backend + dark-mode dashboard (offline + live Gemini modes)
 deploy/         Dockerfile, docker-compose, Cloud Run instructions
 docs/           Architecture deep-dive
-tests/          pytest suite (163 collected, offline)
+tests/          pytest suite (164 collected, offline)
 scripts/        train_model.py, make_sample_pcap.py
 ```
 

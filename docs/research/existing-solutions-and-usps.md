@@ -247,7 +247,7 @@ Cross-cutting gaps common to the prior art:
 > rollout ([argus/ml/world_model/model.py](../../argus/ml/world_model/model.py)), and the
 > real CIC-IDS-2017 host/time-binned sequence pipeline with pinned-hash provenance
 > ([argus/scripts/prepare_cicids2017.py](../../argus/scripts/prepare_cicids2017.py)) all
-> exist and are unit-tested (163 tests collected). What does **not** exist yet: a trained
+> exist and are unit-tested (164 tests collected). What does **not** exist yet: a trained
 > checkpoint and therefore any benchmark numbers (they are *not yet measured* — see
 > [world-model-core.md](../plan/world-model-core.md) WP3–WP6); until a checkpoint ships,
 > forecasts are served by a hand-set heuristic kill-chain prior, clearly labelled as such.

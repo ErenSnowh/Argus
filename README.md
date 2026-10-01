@@ -423,7 +423,7 @@ ARGUS implements defense-in-depth to prevent exploitation of the AI system:
 
 ## 🧪 Testing
 
-The suite collects **163 tests** across 3 modules (count from
+The suite collects **164 tests** across 3 modules (count from
 `pytest --collect-only -q` — rerun it to verify):
 
 ```bash
@@ -512,7 +512,7 @@ Argus/
     └── tests/
         ├── test_core.py              # Core pipeline, agents, guardrails, dashboard
         ├── test_pcap_bins.py         # Packet-bin extraction
-        └── test_prepare_cicids2017.py# Binned CIC-IDS-2017 pipeline (163 tests total)
+        └── test_prepare_cicids2017.py# Binned CIC-IDS-2017 pipeline (164 tests total)
 ```
 
 ---

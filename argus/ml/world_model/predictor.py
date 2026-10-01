@@ -633,6 +633,14 @@ def forecast_infiltration(
     predictor = get_predictor()
     forecast = predictor.predict(flow_features, k_steps=k_steps, context_window=context_window)
 
+    # Which engine produced this. "neural" means a checkpoint was loaded
+    # and the Transformer produced the rollout; "heuristic" means no
+    # checkpoint is available and the kill-chain prior did. Consumers
+    # (dashboard, MCP tools, CLI, reports) must not present one as the
+    # other. See docs/plan/world-model-core.md (D5).
+    engine = "neural" if predictor.is_model_loaded() else "heuristic"
+    model_provenance = _provenance_for(engine, predictor)
+
     return {
         "probability_timeline": forecast.probability_timeline,
         "predicted_stages": forecast.predicted_stages,
@@ -643,12 +651,34 @@ def forecast_infiltration(
         "forecast_explanation": forecast.forecast_explanation,
         "horizon_forecasts": forecast.horizon_forecasts,
         "k_steps": k_steps,
-        # Which engine produced this. "neural" means a checkpoint was loaded
-        # and the Transformer produced the rollout; "heuristic" means no
-        # checkpoint is available and the kill-chain prior did. Consumers
-        # (dashboard, MCP tools, CLI, reports) must not present one as the
-        # other. See docs/plan/world-model-core.md (D5).
-        "engine": "neural" if predictor.is_model_loaded() else "heuristic",
+        "engine": engine,
+        "model_provenance": model_provenance,
+    }
+
+
+def _provenance_for(engine: str, predictor: "InfiltrationPredictor") -> dict:
+    """Describe exactly which model produced a forecast (D5).
+
+    Never claims a model that did not run: the heuristic branch names the
+    hand-set prior, the neural branch names the checkpoint that was loaded.
+    """
+    if engine == "neural":
+        return {
+            "source": "neural checkpoint",
+            "checkpoint": str(predictor._model_path),
+            "description": (
+                "Temporal Transformer world model loaded from a local "
+                "checkpoint; forecast produced by neural rollout."
+            ),
+        }
+    return {
+        "source": "heuristic kill-chain prior (no trained model loaded)",
+        "checkpoint": None,
+        "description": (
+            "No checkpoint available, so the fixed ATT&CK kill-chain "
+            "transition matrix P(S_{t+1} | S_t) produced this forecast. "
+            "Its probabilities are hand-set and do not adapt to this network."
+        ),
     }
 
 

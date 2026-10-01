@@ -267,6 +267,30 @@ def test_dashboard_health_endpoint(api_client):
     assert isinstance(data["torch_available"], bool)
 
 
+def test_forecast_names_engine_and_model_provenance(api_client):
+    """D5: every forecast dict carries `engine` and `model_provenance`.
+
+    Regression lock: the response used to carry only `engine`, so a consumer
+    could not tell which model ran, and the dashboard fell back to
+    "no provenance reported".
+    """
+    resp = api_client.post("/api/forecast", json={"k_steps": 4})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert body["engine"] in {"neural", "heuristic"}
+    prov = body.get("model_provenance")
+    assert isinstance(prov, dict), "model_provenance missing (plan D5)"
+    assert prov.get("source"), "provenance must name its source"
+    assert prov.get("description"), "provenance must describe what ran"
+
+    if body["engine"] == "heuristic":
+        # The heuristic must not pose as a trained model.
+        assert prov["checkpoint"] is None
+        assert "heuristic" in prov["source"].lower()
+        assert "prior" in prov["source"].lower()
+
+
 def test_checkpoint_resolver_prefers_pretrained_when_artifacts_missing(tmp_path, monkeypatch):
     """resolve_world_model_checkpoint() must find a committed pretrained checkpoint.
 

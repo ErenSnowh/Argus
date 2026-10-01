@@ -98,10 +98,10 @@
 
         <!-- Live Model & Infrastructure Status -->
         <div class="hidden xl:flex items-center gap-2">
-          <div class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-panel border border-border-subtle" title="Active Model Checkpoint">
+          <div class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-panel border border-border-subtle" title="Active forecast engine (from /api/health)">
             <span class="w-2 h-2 rounded-full bg-status-safe animate-pulse"></span>
-            <span class="font-code-mono text-[11px] text-status-safe font-semibold">NEURAL</span>
-            <span class="font-telemetry-data text-[11px] text-outline">[46 Feat, 619K Params]</span>
+            <span class="font-code-mono text-[11px] text-status-safe font-semibold" id="badge-engine">ENGINE: …</span>
+            <span class="font-telemetry-data text-[11px] text-outline">[46 Feat]</span>
           </div>
           
           <div class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-surface-panel border border-border-subtle">
@@ -1503,7 +1503,7 @@
           showToast(`Cryptographic Audit Chain: ${d.total_records} blocks verified with 0 tampering!`, "success");
         }
       } catch(e) {
-        showToast("Cryptographic Audit Chain: 1,489 blocks verified with 0 tampering!", "success");
+        showToast("Audit verification failed: the dashboard API did not respond. No verification was performed.", "error");
       }
     }
 
@@ -1519,7 +1519,7 @@
           showToast(`Sample loaded from ${source}`, "success");
         }
       } catch(e) {
-        box.innerHTML = `<div class="text-primary font-bold">Source: ${source.toUpperCase()} (46 features)</div><div class="text-on-surface mt-1">Classes: {"BENIGN": 1401, "Botnet": 3599}</div>`;
+        box.innerHTML = `<div class="text-status-critical font-bold">Sample unavailable — the dashboard API did not respond.</div><div class="text-outline mt-1">Bundled files are synthetic format fixtures for smoke tests, not dataset excerpts; run the loader locally for real rows.</div>`;
       }
     }
 
@@ -1560,6 +1560,21 @@
     }).catch(() => {
       document.getElementById('benchmark-provenance-label').textContent =
         "No benchmark results loaded";
+    });
+
+    // Engine badge: reflects what /api/health actually reports. "NEURAL" only
+    // when a checkpoint is trained AND torch is available; otherwise the
+    // heuristic kill-chain prior is serving.
+    fetch(API + "/api/health").then(r => r.json()).then(h => {
+      const el = document.getElementById('badge-engine');
+      if (!el) return;
+      el.textContent = (h.world_model_trained && h.torch_available)
+        ? "NEURAL" : "HEURISTIC";
+      el.classList.toggle('text-status-safe', !!(h.world_model_trained && h.torch_available));
+      el.classList.toggle('text-status-critical', !(h.world_model_trained && h.torch_available));
+    }).catch(() => {
+      const el = document.getElementById('badge-engine');
+      if (el) { el.textContent = "ENGINE: UNKNOWN"; el.classList.add('text-status-critical'); }
     });
   </script>
 </body>

@@ -33,7 +33,7 @@ ARGUS is an **AI-powered autonomous SOC co-pilot** that:
 
 1. **Predicts** future attack stages before they happen using a Temporal Transformer World Model
 2. **Orchestrates** multi-agent investigation workflows via Google ADK swarm intelligence
-3. **Explains** every detection with attention-weighted feature attribution and TreeSHAP
+3. **Explains** every detection with TreeSHAP feature attribution on the flow classifier
 4. **Reports** to statutory authorities (CERT-In & NCIIPC) within mandated SLAs
 
 > **Core Innovation**: Instead of classifying isolated flows, ARGUS learns the temporal state-transition dynamics $\mathcal{P}(S_{t+1} \mid S_t, \mathbf{x}_t)$ of network traffic and performs K-step autoregressive rollouts to forecast attacker kill-chain progression.
@@ -57,7 +57,7 @@ flowchart TD
     end
 
     subgraph FEATURE["🔬 Feature Engineering"]
-        SCHEMA["38-Feature Unified Schema<br/>24 Flow + 6 Extended + 8 Packet-Level"]
+        SCHEMA["46-Column World-Model Schema<br/>24 Flow + 6 Extended + 8 Packet + 8 Topology"]
         TEMPORAL["Temporal Sliding Windows<br/>(S_t → S_t+1 Transition Pairs)"]
         SCHEMA --> TEMPORAL
     end
@@ -66,7 +66,7 @@ flowchart TD
         direction TB
         RF["Random Forest Classifier<br/>• TreeSHAP Explainability<br/>• 8-Class Flow Detection"]
         WM["Temporal Transformer<br/>• 4-Layer Encoder (d=128, 4 heads)<br/>• K-Step Autoregressive Rollout<br/>• Attention Feature Attribution"]
-        MARKOV["Empirical Markov Fallback<br/>• Kill-Chain P(S_t+1 | S_t)<br/>• Zero-Dependency Engine"]
+        MARKOV["Heuristic Kill-Chain Prior<br/>• Fixed P(S_t+1 | S_t)<br/>• Used when no checkpoint"]
     end
 
     subgraph AGENTS["🤖 Multi-Agent Swarm (Google ADK)"]
@@ -109,10 +109,10 @@ flowchart TD
 | Layer | Component | Purpose |
 |-------|-----------|---------|
 | **Ingestion** | `ml/world_model/dataset_loader.py` | Unified loader for 8 public datasets + live PCAP |
-| **Features** | `ml/world_model/features.py` | 38-feature temporal schema with packet-level attributes |
+| **Features** | `ml/world_model/features.py` | 46-column temporal schema (24 flow + 6 extended + 8 packet + 8 topology) |
 | **Detection** | `ml/model.py` | Random Forest flow classifier with SHAP explainability |
 | **Forecasting** | `ml/world_model/model.py` | Temporal Transformer for K-step attack prediction |
-| **Prediction** | `ml/world_model/predictor.py` | Autoregressive rollout + empirical Markov fallback |
+| **Prediction** | `ml/world_model/predictor.py` | Autoregressive rollout + heuristic kill-chain prior fallback |
 | **Agents** | `agents/orchestrator.py` | Google ADK multi-agent swarm coordinator |
 | **Tools** | `mcp_server/server.py` | FastMCP tool server with security guardrails |
 | **Knowledge** | `mcp_server/knowledge_base.py` | ATT&CK STIX parser + NVD API client |
@@ -123,7 +123,7 @@ flowchart TD
 
 ## 🔮 World Model Engine
 
-ARGUS treats cyber defense as a **Partially Observable Markov Decision Process (POMDP)**, maintaining a latent belief state over the network's security posture.
+ARGUS frames cyber defense as a **partially observable process**: the attacker's true state is never visible — only flow features $\mathbf{x}_t$ — and the world model learns the stage-transition dynamics from that observation stream.
 
 ### Mathematical Formulation
 
@@ -137,8 +137,8 @@ Given network flow features $\mathbf{x}_t$ and a history window $H_t = (\mathbf{
 
 | Engine | Implementation | When Used |
 |--------|----------------|-----------|
-| **Neural Transformer** | 4-layer Transformer encoder (`d_model=128`, 4 heads) with autoregressive rollout heads | GPU/CPU with PyTorch available |
-| **Empirical Markov** | Kill-chain transition matrix $P(S_{t+1} \mid S_t)$ with Bayesian Dirichlet smoothing | Air-gapped deployments, edge sensors, CI/CD |
+| **Neural Transformer** | 4-layer Transformer encoder (`d_model=128`, 4 heads) with autoregressive rollout heads | GPU/CPU with PyTorch available **and** a trained checkpoint present |
+| **Heuristic kill-chain prior** | Fixed transition matrix $P(S_{t+1} \mid S_t)$ hard-coded from the ATT&CK kill chain — no fitting, no smoothing, no learning from data | No checkpoint available (fresh clone, air-gapped, CI). It is a coarse prior, not a measurement: it cannot adapt to a specific network and its probabilities are hand-set. |
 
 ### Three Prediction Heads
 
@@ -149,59 +149,71 @@ Input(t) → [StateEncoder] → [PositionalEncoding] → [TransformerEncoder]
                                                           └── infiltration_head: P(infiltration) (BCE)
 ```
 
-**Combined Loss**: $\mathcal{L} = \alpha \cdot \text{MSE}_\text{state} + \beta \cdot \text{CE}_\text{stage} + \gamma \cdot \text{BCE}_\text{infiltration}$
+**Combined Loss**: $\mathcal{L} = \alpha \cdot \text{MSE}_\text{state} + \beta \cdot \text{CE}_\text{stage} + \gamma \cdot \text{BCE}_\text{infiltration} + \delta \cdot \text{MSE}_\text{horizon}$
 
-Where $\alpha = 0.3$, $\beta = 0.4$, $\gamma = 0.3$.
+Where $\alpha = 0.25$, $\beta = 0.30$, $\gamma = 0.25$, $\delta = 0.20$ (code defaults, `ml/world_model/model.py`).
 
-### Training Configuration
+### Training Status & Benchmark Numbers
 
-| Parameter | Value |
-|-----------|-------|
-| Model Parameters | **612,079** |
-| Optimizer | AdamW ($\text{lr}=10^{-3}$, weight decay $10^{-4}$) |
-| Scheduler | Cosine Annealing |
-| Early Stopping | Patience = 8 epochs |
-| Gradient Clipping | Max norm = 1.0 |
-| Normalization | Per-feature Z-score on training set |
-| Split Strategy | Temporal (no future leakage) |
-| Training Set | 1,600 sequences × 10 timesteps |
-| Test Set | 400 sequences × 10 timesteps |
+No trained world-model checkpoint ships in this repository yet, so **benchmark
+metrics are not yet measured**. When training runs (WP5/WP6 in
+[docs/plan/world-model-core.md](docs/plan/world-model-core.md)), the results
+table will be rendered from a committed `ml/pretrained/benchmark_results.json`
+together with its provenance block (dataset, git SHA, split protocol) — never
+typed by hand.
 
-### Verified Benchmark Results
+Current, honest status of the two engines:
 
-Trained with 2,000 temporal sequences (8 attack scenarios + random kill-chain patterns):
+| Engine | Status |
+|--------|--------|
+| Random Forest flow classifier | Trained during the Docker build / `scripts/train_model.py` from synthetic fixtures — a demo detector, not a benchmarked result |
+| World Model Transformer | Architecture implemented and unit-tested; **not yet trained** (PyTorch is optional and not installed by default) |
+| Heuristic kill-chain prior | Active fallback — this is what the public demo serves today (`torch_available: false` on the deployed instance) |
 
-| Metric | RF Flow Classifier | World Model Transformer |
-|--------|-------------------|------------------------|
-| **Accuracy** | 93.00% | **99.975%** |
-| **Macro F1** | 92.99% | **99.97%** |
-| **Infiltration AUC** | — | **0.983** |
-| **Parameters** | ~10M (RF ensemble) | 612,079 |
-| **Training Time** | ~5s | 57.9s |
-| **Convergence** | N/A (non-iterative) | 24 epochs (early stop) |
+To reproduce every number this README does (and doesn't) claim, see
+[docs/EVALUATION.md](docs/EVALUATION.md).
+
+### CIC-IDS-2017 Data Pipeline
+
+The real-data pipeline for training/evaluation is built on CIC-IDS-2017:
+
+- Source: pinned Hugging Face snapshot `bvsam/cic-ids-2017` @ `70bac6246d99cf046186a02e1cce6883e2ffe7ea`
+  — file hashes and per-file row counts in [`argus/data/cicids2017_provenance.json`](argus/data/cicids2017_provenance.json) (committed).
+- `python scripts/prepare_cicids2017.py` produces 60-second host/time bins and
+  windowed sequences in `argus/data/processed/` (gitignored, rebuilt locally);
+  `python scripts/prepare_cicids2017.py --check` prints the manifest — per-day
+  rows, label histogram, hosts, sequences per horizon.
+- Missing values stay `NaN` + coverage flags — never zero-filled or imputed.
 
 ---
 
 ## 🗄️ Public Datasets
 
-ARGUS includes dedicated loaders and bundled sample fixtures for **8 public cybersecurity benchmark datasets**, normalizing all formats into the unified 38-feature schema:
+ARGUS includes dedicated loaders for **8 public cybersecurity benchmark datasets**, normalizing all formats into the unified 46-column world-model schema:
 
-| # | Dataset | Source | Records | Attack Families | Loader |
-|---|---------|--------|---------|-----------------|--------|
-| 1 | **CIC-IDS-2017** | Canadian Institute for Cybersecurity (UNB) | 2.8M flows | 14 attacks across 5 days | `load_cicids2017()` |
-| 2 | **CIC-IDS-2018** | UNB | 16M flows | 7 scenarios over 10 days | `load_cicids2018()` |
-| 3 | **UNSW-NB15** | Australian Centre for Cyber Security | 2.5M records | 9 attack families (IXIA PerfectStorm) | `load_unsw_nb15()` |
-| 4 | **CTU-13** | CTU University Prague | 13 scenarios | Botnet (Neris, Rbot, Virut, Murlo) | `load_ctu13()` |
-| 5 | **CICIoT2023** | UNB IoT Laboratory | 105 IoT devices | 33 attacks across 7 classes | `load_ciciot2023()` |
-| 6 | **LANL Auth** | Los Alamos National Laboratory | 1B+ events | 58 days user auth / lateral movement | `load_lanl_auth()` |
-| 7 | **DARPA / NSL-KDD** | DARPA / KDD Cup 1999 | 150K records | 4 classes: DoS, Probe, R2L, U2R | `load_darpa()` |
-| 8 | **Synthetic Temporal** | ARGUS Native | Configurable | Full 8-stage kill chain | `generate_temporal_dataset()` |
+| # | Dataset | Source | Loader |
+|---|---------|--------|--------|
+| 1 | **CIC-IDS-2017** | Canadian Institute for Cybersecurity (UNB) | `load_cicids2017()` |
+| 2 | **CIC-IDS-2018** | UNB | `load_cicids2018()` |
+| 3 | **UNSW-NB15** | Australian Centre for Cyber Security | `load_unsw_nb15()` |
+| 4 | **CTU-13** | CTU University Prague | `load_ctu13()` |
+| 5 | **CICIoT2023** | UNB IoT Laboratory | `load_ciciot2023()` |
+| 6 | **LANL Auth** | Los Alamos National Laboratory | `load_lanl_auth()` |
+| 7 | **DARPA / NSL-KDD** | DARPA / KDD Cup 1999 | `load_darpa()` |
+| 8 | **Synthetic Temporal** | ARGUS Native | `generate_temporal_dataset()` |
+
+Row counts per dataset are **not quoted here** — they depend on which files you
+download. For CIC-IDS-2017 the pinned snapshot's per-file row counts and hashes
+are committed in [`argus/data/cicids2017_provenance.json`](argus/data/cicids2017_provenance.json);
+for the others, run the loader and read `len(df)`. The bundled files under
+`argus/data/sample_datasets/` are **synthetic format fixtures for smoke tests —
+not dataset excerpts**.
 
 All loaders are in [`ml/world_model/dataset_loader.py`](argus/ml/world_model/dataset_loader.py) and produce the same output format:
 
 ```python
 X, y_labels, y_infiltration = load_dataset(source="cicids2018", path="/data/cicids2018/")
-# X.shape:              (n_sequences, seq_len, 38)
+# X.shape:              (n_sequences, seq_len, 46)
 # y_labels.shape:       (n_sequences, seq_len)     — attack stage index per timestep
 # y_infiltration.shape: (n_sequences, seq_len)     — binary infiltration flag
 ```
@@ -229,9 +241,9 @@ The ARGUS web dashboard is a single-page SOC operations center with 5 interactiv
 | Tab | Functionality |
 |-----|---------------|
 | **SOC Radar** | Canvas radar sweep with multi-threat blip tracking, SHAP drivers, severity dials |
-| **World Model Forecaster** | Interactive K-step timeline with stage nodes, infiltration curves, attention maps |
+| **World Model Forecaster** | Interactive K-step timeline with stage nodes, infiltration curves, engine badge (neural vs heuristic) |
 | **Knowledge Bases** | Search ATT&CK techniques, browse CAPEC patterns, query NVD CVEs |
-| **Dataset Inspector** | Browse records from all 8 datasets, live benchmark comparison graphs |
+| **Dataset Inspector** | Browse records from the bundled synthetic fixtures; benchmark panel fills in once a committed results JSON exists |
 | **CII & NCIIPC** | Sector selection, SCADA/CBS attack simulation, advisory generation |
 
 ```bash
@@ -333,7 +345,7 @@ python -m uvicorn dashboard.app:app --reload --port 8000
 ### 4. Run Tests
 
 ```bash
-pytest tests/test_core.py -v
+pytest tests -q
 ```
 
 ---
@@ -385,12 +397,14 @@ python -m cli.argus_cli audit verify
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/health` | System health check |
-| `POST` | `/investigate` | Full multi-agent investigation pipeline |
-| `GET` | `/world-model/status` | World Model training metrics |
-| `GET` | `/audit/verify` | Verify HMAC audit chain integrity |
-| `POST` | `/nciipc/generate` | Generate NCIIPC CII advisory |
-| `GET` | `/datasets/sample/{name}` | Retrieve sample records from any dataset |
+| `GET` | `/api/health` | Health check (`rf_model_trained`, `world_model_trained`, `torch_available`) |
+| `POST` | `/api/investigate` | Full multi-agent investigation pipeline |
+| `POST` | `/api/forecast` | K-step world-model forecast (response names the `engine` used) |
+| `GET` | `/api/world-model/status` | World-model checkpoint status & provenance |
+| `GET` | `/api/benchmark` | Benchmark results (falls back to committed JSON or reports "none") |
+| `POST` | `/api/upload` | Upload a CSV/PCAP for analysis |
+| `GET` | `/api/audit/verify` | Verify HMAC audit chain integrity |
+| `POST` | `/api/nciipc/generate` | Generate NCIIPC CII advisory |
 
 ---
 
@@ -409,14 +423,20 @@ ARGUS implements defense-in-depth to prevent exploitation of the AI system:
 
 ## 🧪 Testing
 
-37 unit tests covering the full pipeline:
+The suite collects **163 tests** across 3 modules (count from
+`pytest --collect-only -q` — rerun it to verify):
 
 ```bash
-pytest tests/test_core.py -v
-# 36 passed, 1 skipped (EICAR antivirus conflict) in ~9s
+cd argus
+pytest tests -q
+# On a machine without PyTorch the torch-dependent tests skip; the EICAR
+# fixture test also skips if host antivirus intercepts it.
 ```
 
 Test coverage includes:
+- CIC-IDS-2017 host/time-binned pipeline: no sequence crosses a day or host
+  boundary, horizon-target consistency, unmapped labels raise, padding rows dropped
+- Packet-bin extraction from PCAPs (including unparsable/null timestamps)
 - Dataset generation & balancing
 - RF classifier accuracy floor
 - Flow classification shape validation
@@ -430,8 +450,8 @@ Test coverage includes:
 - Tool allowlist enforcement
 - Prompt injection detection
 - HMAC audit chain integrity
-- Dashboard API endpoints
-- World Model feature schema
+- Dashboard API endpoints (incl. engine naming & health fields)
+- World Model feature schema (46 columns)
 - All 8 dataset loaders
 - NCIIPC report generation
 
@@ -473,22 +493,26 @@ Argus/
     │   ├── flow_features.py          # 24-feature flow statistics generator
     │   ├── threat_score.py           # Composite multi-factor threat gauge
     │   ├── correlation.py            # Multi-flow campaign correlation
-    │   ├── artifacts/                # Trained model weights & metrics
+    │   ├── artifacts/                # Trained model weights & metrics (gitignored)
     │   └── world_model/
     │       ├── model.py              # Temporal Transformer architecture
-    │       ├── features.py           # 38-feature schema & synthetic generator
+    │       ├── features.py           # 46-column schema & synthetic generator
+    │       ├── binning.py            # Host/time binning + sequence windows (WP2)
     │       ├── predictor.py          # K-step autoregressive forecast engine
     │       ├── train.py              # World Model training script
     │       ├── dataset_loader.py     # Unified 8-dataset loader
     │       └── benchmark.py          # World Model vs LR baseline comparison
     ├── scripts/
     │   ├── train_model.py            # RF classifier training entry point
+    │   ├── prepare_cicids2017.py     # CIC-IDS-2017 binning pipeline (--check prints manifest)
     │   ├── make_sample_pcap.py       # Sample PCAP generator
     │   └── generate_sample_datasets.py
     ├── security/
     │   └── guardrails.py             # PII redaction, RBAC, HMAC audit
     └── tests/
-        └── test_core.py              # 37 unit tests
+        ├── test_core.py              # Core pipeline, agents, guardrails, dashboard
+        ├── test_pcap_bins.py         # Packet-bin extraction
+        └── test_prepare_cicids2017.py# Binned CIC-IDS-2017 pipeline (163 tests total)
 ```
 
 ---

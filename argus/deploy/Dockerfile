@@ -8,11 +8,11 @@
 #
 # This image serves the dashboard (dashboard/app.py) which supports both the
 # instant offline deterministic mode and the real live ADK + Gemini agent
-# pipeline. The Gemini API key is embedded in config.py with automatic model
-# fallback and rate-limit handling, making the image ready for zero-setup
-# deployment (e.g., Cloud Run, Render) with full features out of the box.
-# External API keys (like VIRUSTOTAL_API_KEY) can optionally be passed to
-# customize behaviour.
+# pipeline. The offline mode needs no credentials; live mode reads
+# GOOGLE_API_KEY from the environment (pass it with -e or via Render/Cloud
+# Run secrets). Model fallback and rate-limit handling are built into the
+# client wrapper. External API keys (like VIRUSTOTAL_API_KEY) can optionally
+# be passed to customize behaviour.
 
 FROM python:3.12-slim
 

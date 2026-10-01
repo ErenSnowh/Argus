@@ -6,7 +6,10 @@ module (dashboard, CLI, live agent runner) gets it without any manual setup.
 
 Priority:
   1. GOOGLE_API_KEY already set in the environment (user override)
-  2. Embedded default key (ships with the repo for public shareability)
+  2. A local .env file, if present (git-ignored)
+
+No API key is stored in this repository; the live agent pipeline requires
+GOOGLE_API_KEY to be supplied by the operator.
 
 Import this module early in any entry point (dashboard, CLI, run_live.py)
 and the key is automatically available to the Google GenAI SDK.

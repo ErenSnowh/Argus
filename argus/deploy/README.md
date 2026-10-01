@@ -1,8 +1,12 @@
 # Deploying ARGUS
 
-ARGUS is designed to be fully runnable and deployable with **zero setup**. The Gemini API key is embedded inside [config.py](file:///c:/Users/suzum/Downloads/argus-soc-agent/argus/config.py), with a self-healing model fallback chain and rate-limit retry logic built directly into the client wrapper. 
+ARGUS runs with **zero setup** for the offline deterministic pipeline; the live
+**Agent (Gemini)** pipeline reads `GOOGLE_API_KEY` from the environment (or a
+git-ignored `.env` file) — no key is stored in the repository. A self-healing
+model fallback chain and rate-limit retry logic are built directly into the
+client wrapper.
 
-This means that whether you run locally, via Docker, or deploy to Google Cloud Run, **both** the offline deterministic pipeline and the real **Live Agent (Gemini) pipeline** will work immediately without configuring any environment variables or API keys.
+This means that whether you run locally, via Docker, or deploy to Google Cloud Run, the **offline deterministic pipeline** works immediately, and the real **Live Agent (Gemini) pipeline** starts as soon as you provide `GOOGLE_API_KEY`.
 
 ---
 
@@ -84,8 +88,7 @@ Open [http://localhost:8000](http://localhost:8000).
 
 ---
 
-## Overriding the API Keys (Optional)
-If you wish to use your own credentials instead of the embedded defaults:
-- **Gemini**: Set the `GOOGLE_API_KEY` environment variable or add it to a local `.env` file (which is git-ignored).
+## Configuring the API Keys
+- **Gemini (required for live mode)**: Set the `GOOGLE_API_KEY` environment variable or add it to a local `.env` file (which is git-ignored).
 - **VirusTotal (IOC Enrichment)**: Export `VIRUSTOTAL_API_KEY` to enable live reputation checks (otherwise, the tool falls back to a mock local database).
 

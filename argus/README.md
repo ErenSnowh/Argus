@@ -4,7 +4,7 @@
 
 > Built for the **Kaggle 5-Day AI Agents Intensive: Vibe Coding Course with Google** capstone — Track: **Agents for Business** (crossover: Agents for Good — protecting shared digital infrastructure).
 
-[![Tests](https://img.shields.io/badge/tests-22%20passing-brightgreen)]() [![Python](https://img.shields.io/badge/python-3.10%2B-blue)]() [![License](https://img.shields.io/badge/license-MIT-lightgrey)]() [![API Key](https://img.shields.io/badge/API_Key-included-green)]()
+[![Tests](https://img.shields.io/badge/tests-163%20collected-brightgreen)]() [![Python](https://img.shields.io/badge/python-3.10%2B-blue)]() [![License](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ---
 
@@ -54,7 +54,9 @@ flowchart TD
     MCP --> PCAP[PCAP forensics]
 ```
 
-Full diagram, security model, and key-concept-to-artifact mapping: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+Full diagram, security model, and key-concept-to-artifact mapping: see
+**[docs/plan/world-model-core.md](../docs/plan/world-model-core.md)** (plan of
+record) and the root **[README.md](../README.md)**.
 
 ## Quick Start (zero setup — everything works out of the box)
 
@@ -66,8 +68,9 @@ uvicorn dashboard.app:app --reload --port 8000
 # open http://localhost:8000
 ```
 
-The Gemini API key is **embedded in the repo** (`config.py`) — no `.env` file
-or manual key setup needed. The dashboard has two modes:
+The Gemini API key comes from the environment (`GOOGLE_API_KEY`, or a local
+`.env` — see `config.py`); the offline mode needs no key at all. The dashboard
+has two modes:
 
 - **⚡ Offline Pipeline** — instant, deterministic, zero API calls
 - **🧠 Live Agent (Gemini)** — real ADK multi-agent pipeline streaming against Gemini
@@ -77,7 +80,8 @@ Toggle between them in the dashboard header.
 ## Run the real multi-agent ADK + Gemini pipeline (CLI)
 
 ```bash
-# No API key setup needed — it's already embedded
+# Live mode reads GOOGLE_API_KEY from the environment (offline mode needs no key)
+export GOOGLE_API_KEY=your_key   # or put it in a .env file
 python agents/run_live.py "Investigate this network flow: a single source IP made 200 short-lived TCP SYN connections to sequential destination ports within 16ms. PCAP at data/sample_portscan.pcap."
 ```
 
@@ -110,14 +114,17 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-22 tests covering the detector, MITRE mapping, IOC enrichment, PCAP
-forensics, playbook generation, the dashboard's API error handling, and
-every security guardrail (redaction, allowlist enforcement, prompt-injection
-detection, audit-chain tamper detection, multi-writer chain integrity) — all
-offline, no API key needed. Tests train into an isolated temp path and never
-touch the production model artifact in `ml/artifacts/`. The LLM-driven agent
-layer is exercised via `agents/run_live.py` against the embedded Gemini key; see
-`docs/ARCHITECTURE.md` for why that layer isn't unit-tested the same way.
+163 tests collected (`pytest --collect-only -q`) covering the detector, MITRE
+mapping, IOC enrichment, PCAP forensics, playbook generation, the dashboard's
+API error handling, the CIC-IDS-2017 binning pipeline, packet-bin extraction,
+and every security guardrail (redaction, allowlist enforcement,
+prompt-injection detection, audit-chain tamper detection, multi-writer chain
+integrity) — all offline, no API key needed. Tests train into an isolated temp
+path and never touch the production model artifact in `ml/artifacts/`. The
+LLM-driven agent layer is exercised via `agents/run_live.py` with a
+`GOOGLE_API_KEY` from the environment; it is not unit-tested the same way —
+see [docs/plan/world-model-core.md](../docs/plan/world-model-core.md) for the
+current state of the world-model work.
 
 ## Key concepts demonstrated
 
@@ -133,7 +140,7 @@ layer is exercised via `agents/run_live.py` against the embedded Gemini key; see
 ## Project structure
 
 ```
-config.py       Central config: auto-loads the Gemini API key
+config.py       Central config: reads GOOGLE_API_KEY from env/.env (no key is stored in the repo)
 agents/         ADK LlmAgents + orchestrator + live/offline runners
 mcp_server/     Real MCP server: detection, ATT&CK mapping, IOC enrichment, forensics, playbooks
 ml/             Synthetic CICIDS2017-style data generator + Random Forest training/inference
@@ -142,22 +149,23 @@ cli/            `argus` Agent Skills CLI (with --live mode)
 dashboard/      FastAPI backend + dark-mode dashboard (offline + live Gemini modes)
 deploy/         Dockerfile, docker-compose, Cloud Run instructions
 docs/           Architecture deep-dive
-tests/          pytest suite (22 tests, offline)
+tests/          pytest suite (163 collected, offline)
 scripts/        train_model.py, make_sample_pcap.py
 ```
 
 ## Design decisions worth knowing about
 
-- **API key ships embedded.** The Gemini API key is baked into `config.py` so
-  anyone who clones this repo can run the full live agent pipeline
-  immediately. Override by setting `GOOGLE_API_KEY` in your environment.
-- **Synthetic, not scraped, training data.** The full CICIDS2017 dataset is
-  several GB and needs a manual download; `ml/flow_features.py` generates a
-  reproducible synthetic dataset with the same feature philosophy (and
-  intentionally injected noise, landing at a realistic ~94% accuracy instead
-  of an unrealistic 100%) so the whole pipeline runs end-to-end with no
-  external downloads. Swapping in real CICIDS2017 CSVs only requires
-  changing the data source.
+- **API key from the environment.** The Gemini API key is read from
+  `GOOGLE_API_KEY` (or a local `.env` file) — nothing is baked into the repo.
+  Offline mode runs with no key at all.
+- **Synthetic fixtures, not scraped data, for the demo path.** `ml/flow_features.py`
+  generates a reproducible synthetic dataset with the same feature philosophy
+  (and intentionally injected noise) so the whole pipeline runs end-to-end with
+  no external downloads. The real CIC-IDS-2017 pipeline
+  (`scripts/prepare_cicids2017.py`) builds binned sequences from a pinned,
+  hash-verified snapshot — see its `--check` mode and
+  `data/cicids2017_provenance.json`. Accuracy figures are **not quoted here**:
+  run `pytest` / `argus benchmark` and read the results JSON.
 - **Remediation only ever proposes.** `remediation_agent` has a
   `propose_playbook` tool and explicitly does **not** have an
   `execute_playbook` tool — see `security/guardrails.TOOL_ALLOWLISTS`. An

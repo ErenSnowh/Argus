@@ -237,14 +237,22 @@ Cross-cutting gaps common to the prior art:
 | Combine flow + packet levels | Most pick one | **Both levels** fused into one state vector |
 | Generalize to unseen attacks | PPT-GNN pretraining; Dudman&Bull generalization | Dynamics learning + held-out-attack eval vs. **logistic-regression baseline** (PS-mandated benchmark) |
 
-> **Current ARGUS state (repo):** today ARGUS is a **detection + triage + response co-pilot** —
+> **Current ARGUS state (repo):** ARGUS today is a **detection + triage + response co-pilot** —
 > a Random-Forest *static* flow classifier ([argus/ml/model.py](../../argus/ml/model.py)),
 > rule-based composite threat scoring
 > ([argus/ml/threat_score.py](../../argus/ml/threat_score.py)), and rule-based kill-chain
 > correlation ([argus/ml/correlation.py](../../argus/ml/correlation.py)), plus MITRE mapping,
-> PCAP forensics, guardrails, and a dashboard. To satisfy PS 26153 the **world-model core**
-> (learned `P(S_t+1|S_t)` sequence/GNN model + K-step rollout + SHAP/attention) is the piece to
-> add — that is precisely the whitespace above.
+> PCAP forensics, guardrails, and a dashboard. On top of that, the **world-model core is now
+> built but not yet trained**: the 46-column schema, the Transformer architecture with K-step
+> rollout ([argus/ml/world_model/model.py](../../argus/ml/world_model/model.py)), and the
+> real CIC-IDS-2017 host/time-binned sequence pipeline with pinned-hash provenance
+> ([argus/scripts/prepare_cicids2017.py](../../argus/scripts/prepare_cicids2017.py)) all
+> exist and are unit-tested (163 tests collected). What does **not** exist yet: a trained
+> checkpoint and therefore any benchmark numbers (they are *not yet measured* — see
+> [world-model-core.md](../plan/world-model-core.md) WP3–WP6); until a checkpoint ships,
+> forecasts are served by a hand-set heuristic kill-chain prior, clearly labelled as such.
+> Completing the learned `P(S_t+1|S_t)` model + evaluation vs. the logistic-regression
+> baseline is the remaining whitespace above.
 
 ---
 

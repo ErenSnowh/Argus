@@ -872,6 +872,15 @@ def test_counterfactual_api_endpoint(api_client):
     assert "baseline" in data
     assert "mitigations" in data
     assert "recommended_action" in data
+    # D5: the counterfactual must name its engine and provenance too — a
+    # mitigation delta attributed to the wrong model is a false claim.
+    assert data["engine"] in {"neural", "heuristic"}
+    prov = data["model_provenance"]
+    assert isinstance(prov, dict)
+    assert prov.get("source")
+    assert prov.get("description")
+    if data["engine"] == "heuristic":
+        assert prov["checkpoint"] is None
 
 
 def test_benchmark_includes_rf_baseline():

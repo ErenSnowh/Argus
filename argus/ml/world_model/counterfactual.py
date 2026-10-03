@@ -126,6 +126,8 @@ class CounterfactualResult(dict):
         recommended_action: str,
         max_risk_reduction: float,
         k_steps: int = 5,
+        engine: str | None = None,
+        model_provenance: dict | None = None,
     ):
         super().__init__(
             baseline=baseline,
@@ -137,6 +139,8 @@ class CounterfactualResult(dict):
             recommended_action=recommended_action,
             max_risk_reduction=max_risk_reduction,
             k_steps=k_steps,
+            engine=engine,
+            model_provenance=model_provenance,
         )
         self.baseline = baseline
         self.baseline_risk = baseline_risk
@@ -147,6 +151,8 @@ class CounterfactualResult(dict):
         self.recommended_action = recommended_action
         self.max_risk_reduction = max_risk_reduction
         self.k_steps = k_steps
+        self.engine = engine
+        self.model_provenance = model_provenance
 
     def __getattr__(self, name: str):
         try:
@@ -270,6 +276,15 @@ class CounterfactualSimulator:
             "horizon_forecasts": getattr(baseline, "horizon_forecasts", None),
         }
 
+        # Which engine produced these rollouts (D5). Evaluated *after* the
+        # predict() calls above, because the checkpoint loads lazily on first
+        # predict: a counterfactual must never claim a neural engine it did
+        # not run, nor hide one it did. Mirrors forecast_infiltration().
+        from ml.world_model.predictor import _provenance_for
+
+        engine = "neural" if predictor.is_model_loaded() else "heuristic"
+        model_provenance = _provenance_for(engine, predictor)
+
         return CounterfactualResult(
             baseline=baseline_dict,
             baseline_risk=round(baseline.max_infiltration_prob, 4),
@@ -280,6 +295,8 @@ class CounterfactualSimulator:
             recommended_action=best_action,
             max_risk_reduction=round(max_reduction, 4),
             k_steps=k_steps,
+            engine=engine,
+            model_provenance=model_provenance,
         )
 
     def simulate_to_dict(

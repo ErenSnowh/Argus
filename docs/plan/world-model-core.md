@@ -316,15 +316,15 @@ verification block pasted in every commit body.
 | WP | Est. | Acceptance test | Commit |
 |----|------|-----------------|--------|
 | WP0 fresh-clone green | 2 h | `pytest argus/tests -q` gives 0 failed with and without torch; `/api/benchmark` falls back to `ml/pretrained/` and skips with a reason if neither exists; health serves `rf_model_trained`, `world_model_trained`, `torch_available` | **done** |
-| WP1 demo integrity | 3 h | with no checkpoint, `POST /api/forecast` returns `"engine": "heuristic"` and the UI shows the badge; the `index.html:1086` label is JSON-driven; no "Dirichlet" or "attention-weighted" claims remain | `feat(world-model): name the forecast engine and its provenance` |
+| WP1 demo integrity | 3 h | with no checkpoint, `POST /api/forecast` returns `"engine": "heuristic"` and the UI shows the badge; the `index.html:1086` label is JSON-driven; no "Dirichlet" or "attention-weighted" claims remain | **done** (`0e53db7`, `b597019`, `778119e`, `eb55bc5`) |
 | WP1.5 upload truthfulness | 2 h | a corrupt CSV and a corrupt PCAP each produce an explicit 400 or packet evidence, never a CRITICAL forecast; the `+67.5s` toast is gone | **done** |
-| WP2 real-data pipeline | 1-2 d | `prepare_cicids2017.py --check` prints the manifest; tests assert no sequence crosses a day or host boundary, `y_attack_within_h1 == (y_stage_h1 != 0)`, and unmapped labels raise | `feat(data): host/time-binned CIC-IDS-2017 pipeline + manifest` |
-| WP3 model fixes | 1 d | `train --dataset synthetic --epochs 2` and `--dataset cicids2017 --epochs 1 --max-sequences 2000` both finish on CPU and write a checkpoint that `predictor.py` loads | `fix(world-model): real horizon heads, device-safe mask, provenance checkpoints` |
-| WP4 honest explainability | 1 d | captured attention has shape `(layers, heads, W, W)` with rows summing to 1 +/- 1e-4; attribution for a scan ranks `unique_dst_ports` or `src_fanout` in the top 3, and the test states which dataset it used | `feat(world-model): per-head attention + integrated gradients attribution` |
-| WP5 forecast benchmark | 1-2 d | the JSON validates against the committed schema; the report shows LR-x_t, LR-lagged, RF and the World Model for k in {1,2,4} under P-A and P-B; every README number is script-generated | `feat(benchmark): K-step forecast protocols, baselines, calibrated lead time` |
-| WP6 ship checkpoint and numbers | 1 d | fresh clone, install, uvicorn, then `/api/forecast` returns `"engine": "neural"`, `/api/benchmark` returns the committed real results, and `docker build` succeeds | `chore(release): ship the CIC-IDS-2017 checkpoint, metrics and provenance` |
-| WP7 documentation truth pass | 0.5 d | the WP7 grep returns nothing | `docs: make every claim traceable to a result artifact` |
-| WP8 CTU-13 (candidate to cut) | 1 d | one extra P-A row through the same `binning.py`, no new features | `feat(data): CTU-13 P-A row` |
+| WP2 real-data pipeline | 1-2 d | `prepare_cicids2017.py --check` prints the manifest; tests assert no sequence crosses a day or host boundary, `y_attack_within_h1 == (y_stage_h1 != 0)`, and unmapped labels raise | **done** (`efa8bde`) |
+| WP3 model fixes | 1 d | `train --dataset synthetic --epochs 2` and `--dataset cicids2017 --epochs 1 --max-sequences 2000` both finish on CPU and write a checkpoint that `predictor.py` loads | **not yet done** (flag 4) |
+| WP4 honest explainability | 1 d | captured attention has shape `(layers, heads, W, W)` with rows summing to 1 +/- 1e-4; attribution for a scan ranks `unique_dst_ports` or `src_fanout` in the top 3, and the test states which dataset it used | **not yet done** (WP5 runs first, brief §6.1) |
+| WP5 forecast benchmark | 1-2 d | the JSON validates against the committed schema; the report shows LR-x_t, LR-lagged, RF and the World Model for k in {1,2,4} under P-A and P-B; every README number is script-generated | **not yet done** (flag 4) |
+| WP6 ship checkpoint and numbers | 1 d | fresh clone, install, uvicorn, then `/api/forecast` returns `"engine": "neural"`, `/api/benchmark` returns the committed real results, and `docker build` succeeds | **not yet done** (flag 4) |
+| WP7 documentation truth pass | 0.5 d | the WP7 grep returns nothing | **done** (`0e53db7`) |
+| WP8 CTU-13 (candidate to cut) | 1 d | one extra P-A row through the same `binning.py`, no new features | **not yet done** (cut per flag 2) |
 
 Flags: **(1)** WP0 and WP1.5 were committed together because both rewrite
 `dashboard/app.py` and `tests/test_core.py`; splitting them would need hunk
@@ -332,7 +332,13 @@ surgery that risks a broken intermediate commit. **(2)** WP8 is the first thing
 to cut if the schedule slips past 20 Oct: a second dataset adds less to the
 graded claim than a clean P-B protocol does. **(3)** WP3's `assert` that every
 horizon head receives targets must not be softened to make the CPU budget pass;
-`--cpu-budget-minutes` is the release valve instead.
+`--cpu-budget-minutes` is the release valve instead. **(4)** WP3, WP5 and WP6 are
+**not yet done** as of 2026-10-03: `torch` is not installed in the development
+environment and not in `argus/requirements.txt`, `train.py`/`benchmark.py` still
+omit `--dataset cicids2017`, and no checkpoint or `benchmark_results.json` is
+committed. Until they run, `/api/forecast` reports `engine: "heuristic"` and
+`/api/benchmark` 404s with a "no numbers are fabricated" message — both are the
+honest state, not a defect. WP4 waits for WP5 (brief §6.1).
 
 ## 2.5 Risks and open questions
 

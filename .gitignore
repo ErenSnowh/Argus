@@ -30,3 +30,24 @@ docs/ui-instruction.md
 # Datasets - raw and processed data are never committed (see docs/plan/world-model-core.md, D2)
 argus/data/raw/
 argus/data/processed/
+
+# Local scratch / build tooling (not part of the deliverable; never committed)
+_*.py
+_*.txt
+__pycache__/
+build_*.py
+generate_*.py
+rebuild_slide*.py
+preview_slides/
+brag-output/
+ARGUS_SIH2026_FINAL.pptx
+skills-lock.json
+initial_prompt.txt
+.agents/
+.clinerules/
+# Generated docs images (scripts above produce them; none are tracked)
+docs/*.png
+# Live tap sniffs packets but hardcodes imputed feature stds (45.0/30.0/15.0,
+# down_up_ratio 0.5, bwd = fwd/2) - committing it would violate the
+# no-imputation rule; revisit before shipping (docs/plan/world-model-core.md).
+argus/scripts/live_hardware_tap.py

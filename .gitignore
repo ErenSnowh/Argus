@@ -34,6 +34,7 @@ argus/data/processed/
 # Local scratch / build tooling (not part of the deliverable; never committed)
 _*.py
 _*.txt
+_*.png
 __pycache__/
 build_*.py
 generate_*.py
@@ -41,6 +42,9 @@ rebuild_slide*.py
 preview_slides/
 brag-output/
 ARGUS_SIH2026_FINAL.pptx
+ARGUS_SIH2026_FINAL.pdf
+forecast_tab_screenshot.png
+forecast_tab_screenshot_crop.png
 skills-lock.json
 initial_prompt.txt
 .agents/

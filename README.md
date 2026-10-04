@@ -17,9 +17,9 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-Dashboard-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![MCP](https://img.shields.io/badge/MCP-Tool_Server-7C3AED?style=for-the-badge)](https://modelcontextprotocol.io)
 [![MITRE ATT&CK](https://img.shields.io/badge/MITRE-ATT%26CK_v14-FF6B6B?style=for-the-badge)](https://attack.mitre.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](argus/LICENSE)
 
-[Quick Start](#-quick-start) · [Architecture](#-system-architecture) · [World Model](#-world-model-engine) · [Datasets](#-public-datasets) · [Dashboard](#-web-dashboard) · [Compliance](#%EF%B8%8F-statutory-compliance) · [API Reference](#-cli--api-reference)
+[Quick Start](#-quick-start) · [Architecture](#-system-architecture) · [World Model](#-world-model-engine) · [Datasets](#%EF%B8%8F-public-datasets) · [Dashboard](#%EF%B8%8F-web-dashboard) · [Compliance](#%EF%B8%8F-statutory-compliance) · [API Reference](#-cli--api-reference)
 
 </div>
 

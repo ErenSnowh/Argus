@@ -521,8 +521,9 @@
 
               <!-- Driving Attention Weights Table -->
               <div class="flex flex-col gap-1.5">
-                <span class="font-headline-sm text-xs font-semibold text-on-surface">Top Attentive Driving Features (Self-Attention Head Decomposition)</span>
-                <div class="grid grid-cols-3 gap-2 text-xs font-telemetry-data">
+                <span class="font-headline-sm text-xs font-semibold text-on-surface">Top Driving Features <span id="xai-method-label" class="text-outline font-normal">(Self-Attention · Attention Weights)</span></span>
+                <div id="driving-features-grid" class="grid grid-cols-3 gap-2 text-xs font-telemetry-data">
+                  <!-- Populated dynamically by renderDrivingFeatures() on forecast response; static fallback below -->
                   <div class="p-2 rounded bg-surface-panel border border-border-subtle flex flex-col gap-0.5">
                     <span class="text-[10px] text-outline truncate">src_fanout (34.2%)</span>
                     <span class="font-bold text-primary font-code-mono">142 hosts</span>
@@ -542,7 +543,7 @@
               </div>
 
               <!-- Topology Subgraph Micro-Widget -->
-              <div class="p-2.5 rounded bg-surface-panel border border-border-subtle flex flex-col gap-1.5">
+              <div class="p-2.5 rounded bg-surface-panel border border-border-subtle flex flex-col gap-1.5" id="graph-signals-panel">
                 <div class="flex items-center justify-between text-xs">
                   <span class="font-headline-sm font-semibold text-on-surface flex items-center gap-1">
                     <span class="material-symbols-outlined text-primary text-[14px]">hub</span>
@@ -1249,26 +1250,7 @@
         });
         if (res.ok) {
           const data = await res.json();
-          document.getElementById('forecast-risk-pill').textContent = `${data.risk_level} RISK: ${(data.max_infiltration_prob * 100).toFixed(1)}%`;
-          document.getElementById('card-max-risk').textContent = `${(data.max_infiltration_prob * 100).toFixed(1)}% Max Risk`;
-          if (data.probability_timeline && data.probability_timeline.length >= 5) {
-            document.getElementById('prob-t0').textContent = `${(data.probability_timeline[0]*100).toFixed(1)}%`;
-            document.getElementById('prob-t30').textContent = `${(data.probability_timeline[1]*100).toFixed(1)}%`;
-            document.getElementById('prob-t60').textContent = `${(data.probability_timeline[2]*100).toFixed(1)}%`;
-            document.getElementById('prob-t120').textContent = `${(data.probability_timeline[3]*100).toFixed(1)}%`;
-            document.getElementById('prob-t300').textContent = `${(data.probability_timeline[4]*100).toFixed(1)}%`;
-          }
-          if (data.predicted_stages && data.predicted_stages.length >= 5) {
-            document.getElementById('stage-t0').textContent = data.predicted_stages[0];
-            document.getElementById('stage-t30').textContent = data.predicted_stages[1];
-            document.getElementById('stage-t60').textContent = data.predicted_stages[2];
-            document.getElementById('stage-t120').textContent = data.predicted_stages[3];
-            document.getElementById('stage-t300').textContent = data.predicted_stages[4];
-          }
-          const expEl = document.getElementById('forecast-explanation-text');
-          if (expEl && data.forecast_explanation) {
-            expEl.textContent = data.forecast_explanation;
-          }
+          applyForecastToUI(data);
           showToast("Trajectory forward rollout complete! Peak risk: " + (data.max_infiltration_prob * 100).toFixed(1) + "%", "success");
         }
       } catch (e) {
@@ -1323,24 +1305,7 @@
           }
           showToast(`${selectedUploadFile.name}: packet evidence only${packets}. No flow features, so no forecast is shown.`, "info");
         } else {
-          document.getElementById('forecast-risk-pill').textContent = `${fc.risk_level} RISK: ${(fc.max_infiltration_prob * 100).toFixed(1)}%`;
-          document.getElementById('card-max-risk').textContent = `${(fc.max_infiltration_prob * 100).toFixed(1)}% Max Risk`;
-          if (fc.probability_timeline && fc.probability_timeline.length >= 5) {
-            document.getElementById('prob-t0').textContent = `${(fc.probability_timeline[0]*100).toFixed(1)}%`;
-            document.getElementById('prob-t30').textContent = `${(fc.probability_timeline[1]*100).toFixed(1)}%`;
-            document.getElementById('prob-t60').textContent = `${(fc.probability_timeline[2]*100).toFixed(1)}%`;
-            document.getElementById('prob-t120').textContent = `${(fc.probability_timeline[3]*100).toFixed(1)}%`;
-            document.getElementById('prob-t300').textContent = `${(fc.probability_timeline[4]*100).toFixed(1)}%`;
-          }
-          if (fc.predicted_stages && fc.predicted_stages.length >= 5) {
-            document.getElementById('stage-t0').textContent = fc.predicted_stages[0];
-            document.getElementById('stage-t30').textContent = fc.predicted_stages[1];
-            document.getElementById('stage-t60').textContent = fc.predicted_stages[2];
-            document.getElementById('stage-t120').textContent = fc.predicted_stages[3];
-            document.getElementById('stage-t300').textContent = fc.predicted_stages[4];
-          }
-          const why2 = document.getElementById('forecast-explanation-text');
-          if (why2 && fc.forecast_explanation) { why2.textContent = fc.forecast_explanation; }
+          applyForecastToUI(fc);
           const engine = fc.engine ? ` (engine: ${fc.engine})` : " (engine: unreported)";
           const prov = fc.model_provenance && fc.model_provenance.source
             ? fc.model_provenance.source
@@ -1569,13 +1534,183 @@
       const el = document.getElementById('badge-engine');
       if (!el) return;
       el.textContent = (h.world_model_trained && h.torch_available)
-        ? "NEURAL" : "HEURISTIC";
+        ? "ENGINE: NEURAL" : "ENGINE: HEURISTIC";
       el.classList.toggle('text-status-safe', !!(h.world_model_trained && h.torch_available));
-      el.classList.toggle('text-status-critical', !(h.world_model_trained && h.torch_available));
+      el.classList.toggle('text-status-medium', !(h.world_model_trained && h.torch_available));
     }).catch(() => {
       const el = document.getElementById('badge-engine');
       if (el) { el.textContent = "ENGINE: UNKNOWN"; el.classList.add('text-status-critical'); }
     });
+
+    // -------------------------------------------------------------------------
+    // Dynamic SVG fan chart — redraws the probability trajectory curve and
+    // uncertainty corridor from real API data (probability_timeline).
+    // viewBox is 500×160; y=160 → 0%, y=0 → 100%.
+    // -------------------------------------------------------------------------
+    const TRAJ_X = [20, 120, 240, 360, 480];   // x positions for T+0..T+4
+    const TRAJ_SIGMA = 0.08;                    // ±σ band half-width (fraction)
+
+    function probToY(p) {
+      // Map probability [0,1] → SVG y [155, 5] (5px padding each side)
+      return 155 - p * 150;
+    }
+
+    function renderFanChart(timeline) {
+      if (!timeline || timeline.length < 5) return;
+      const pts = timeline.slice(0, 5);
+
+      // Main trajectory polyline
+      const curve = document.getElementById('traj-curve');
+      if (curve) {
+        curve.setAttribute('points', pts.map((p, i) => `${TRAJ_X[i]},${probToY(p).toFixed(1)}`).join(' '));
+      }
+
+      // Data-point circles (first 4 cyan, last pulses red if > 0.8)
+      pts.forEach((p, i) => {
+        const el = document.getElementById(`traj-pt-${i}`);
+        if (!el) return;
+        el.setAttribute('cy', probToY(p).toFixed(1));
+        el.setAttribute('cx', TRAJ_X[i]);
+        if (i === pts.length - 1 && p >= 0.8) {
+          el.setAttribute('fill', '#F87171');
+          el.setAttribute('r', '6');
+        } else {
+          el.setAttribute('fill', '#5EEAD4');
+          el.setAttribute('r', '4');
+        }
+      });
+
+      // Uncertainty corridor polygon (upper band then lower band reversed)
+      const corridor = document.getElementById('traj-corridor');
+      if (corridor) {
+        const upper = pts.map((p, i) => `${TRAJ_X[i]},${probToY(Math.min(1, p + TRAJ_SIGMA)).toFixed(1)}`);
+        const lower = pts.map((p, i) => `${TRAJ_X[i]},${probToY(Math.max(0, p - TRAJ_SIGMA)).toFixed(1)}`).reverse();
+        corridor.setAttribute('points', [...upper, ...lower].join(' '));
+      }
+    }
+
+    // Add dynamic IDs to the existing SVG elements so renderFanChart can find them.
+    // Done at DOMContentLoaded time so HTML need not be rewritten.
+    document.addEventListener('DOMContentLoaded', () => {
+      const svg = document.querySelector('#traj-curve')?.closest('svg');
+      if (!svg) return;
+      // Tag the corridor polygon
+      const poly = svg.querySelector('polygon');
+      if (poly && !poly.id) poly.id = 'traj-corridor';
+      // Tag the five data-point circles by their order in the SVG
+      const circles = svg.querySelectorAll('circle');
+      circles.forEach((c, i) => { if (!c.id) c.id = `traj-pt-${i}`; });
+    });
+
+    // -------------------------------------------------------------------------
+    // Dynamic driving features grid — renders top features from the forecast
+    // response into the three driving-feature cards.
+    // -------------------------------------------------------------------------
+    const RISK_COLOR = { critical: 'text-status-critical', high: 'text-status-high', medium: 'text-status-medium', low: 'text-status-safe' };
+
+    function riskColorForImportance(imp) {
+      if (imp >= 0.3) return RISK_COLOR.critical;
+      if (imp >= 0.2) return RISK_COLOR.high;
+      if (imp >= 0.1) return RISK_COLOR.medium;
+      return RISK_COLOR.low;
+    }
+
+    function renderDrivingFeatures(stepsFeatures, xaiMethod) {
+      // stepsFeatures: driving_features[step_idx] — array of {name, importance, value?, shap_value?}
+      const container = document.getElementById('driving-features-grid');
+      if (!container) return;
+      const features = (stepsFeatures && stepsFeatures.length) ? stepsFeatures.slice(0, 3) : [];
+      if (!features.length) return;
+
+      const methodBadge = xaiMethod === 'shap_gradient'
+        ? '<span class="px-1 py-0.5 rounded text-[9px] font-badge-micro bg-secondary-container text-secondary border border-secondary/30">SHAP</span>'
+        : '<span class="px-1 py-0.5 rounded text-[9px] font-badge-micro bg-primary-container/40 text-primary border border-primary/20">ATTENTION</span>';
+
+      container.innerHTML = features.map(f => {
+        const pct = ((f.importance || 0) * 100).toFixed(1);
+        const val = f.value !== undefined ? String(f.value).slice(0, 12) : '—';
+        const color = riskColorForImportance(f.importance || 0);
+        return `<div class="p-2 rounded bg-surface-panel border border-border-subtle flex flex-col gap-0.5">
+          <div class="flex items-center justify-between gap-1">
+            <span class="text-[10px] text-outline truncate">${f.name} (${pct}%)</span>
+            ${methodBadge}
+          </div>
+          <span class="font-bold text-primary font-code-mono">${val}</span>
+          <span class="text-[9px] ${color}">${f.description || f.name}</span>
+        </div>`;
+      }).join('');
+    }
+
+    // -------------------------------------------------------------------------
+    // Graph signals panel — renders graph_signals dict from forecast response
+    // into the topology micro-widget.
+    // -------------------------------------------------------------------------
+    function renderGraphSignals(graphSignals, graphInterpretation) {
+      if (!graphSignals) return;
+      const panel = document.getElementById('graph-signals-panel');
+      if (!panel) return;
+
+      const score = graphSignals.graph_anomaly_score || 0;
+      const scoreColor = score >= 0.75 ? 'text-status-critical' : score >= 0.5 ? 'text-status-high' : score >= 0.25 ? 'text-status-medium' : 'text-status-safe';
+      const barW = Math.round(score * 100);
+
+      panel.innerHTML = `
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-[10px] font-telemetry-data text-outline">COMPOSITE GRAPH ANOMALY SCORE</span>
+          <span class="font-code-mono font-bold text-sm ${scoreColor}">${(score * 100).toFixed(1)}%</span>
+        </div>
+        <div class="w-full h-1.5 rounded bg-surface-overlay mb-2">
+          <div class="h-full rounded transition-all duration-500 ${score >= 0.5 ? 'bg-status-critical' : 'bg-primary'}" style="width:${barW}%"></div>
+        </div>
+        <div class="grid grid-cols-2 gap-1 text-[10px] font-telemetry-data mb-1.5">
+          <div class="flex justify-between"><span class="text-outline">Degree Δ</span><span class="text-on-surface font-code-mono">${(graphSignals.degree_centrality_delta||0).toFixed(2)}</span></div>
+          <div class="flex justify-between"><span class="text-outline">Edge Burst</span><span class="text-on-surface font-code-mono">${((graphSignals.new_edge_burst_score||0)*100).toFixed(0)}%</span></div>
+          <div class="flex justify-between"><span class="text-outline">Cross-Subnet</span><span class="text-on-surface font-code-mono">${((graphSignals.cross_subnet_ratio||0)*100).toFixed(0)}%</span></div>
+          <div class="flex justify-between"><span class="text-outline">Lateral Mvmt</span><span class="text-on-surface font-code-mono">${((graphSignals.lateral_movement_signal||0)*100).toFixed(0)}%</span></div>
+        </div>
+        ${graphInterpretation ? `<p class="text-[9px] text-on-surface-variant leading-relaxed">${graphInterpretation}</p>` : ''}
+      `;
+    }
+
+    // -------------------------------------------------------------------------
+    // Unified forecast render — called by both triggerForecast() and
+    // runUploadedSimulation() so all dynamic panels update together.
+    // -------------------------------------------------------------------------
+    function applyForecastToUI(fc) {
+      if (!fc) return;
+      document.getElementById('forecast-risk-pill').textContent = `${fc.risk_level} RISK: ${(fc.max_infiltration_prob * 100).toFixed(1)}%`;
+      document.getElementById('card-max-risk').textContent = `${(fc.max_infiltration_prob * 100).toFixed(1)}% Max Risk`;
+
+      if (fc.probability_timeline && fc.probability_timeline.length >= 5) {
+        ['t0','t30','t60','t120','t300'].forEach((id, i) => {
+          const el = document.getElementById(`prob-${id}`);
+          if (el) el.textContent = `${(fc.probability_timeline[i]*100).toFixed(1)}%`;
+        });
+        renderFanChart(fc.probability_timeline);
+      }
+
+      if (fc.predicted_stages && fc.predicted_stages.length >= 5) {
+        ['t0','t30','t60','t120','t300'].forEach((id, i) => {
+          const el = document.getElementById(`stage-${id}`);
+          if (el) el.textContent = fc.predicted_stages[i];
+        });
+      }
+
+      const expEl = document.getElementById('forecast-explanation-text');
+      if (expEl && fc.forecast_explanation) expEl.textContent = fc.forecast_explanation;
+
+      // Driving features: use last step (most predictive for future state)
+      if (fc.driving_features && fc.driving_features.length) {
+        const lastStep = fc.driving_features[fc.driving_features.length - 1];
+        const xaiMethod = lastStep && lastStep[0] && lastStep[0].xai_method;
+        renderDrivingFeatures(lastStep, xaiMethod);
+      }
+
+      // Graph signals (present when context_window was provided)
+      if (fc.graph_signals) {
+        renderGraphSignals(fc.graph_signals, fc.graph_interpretation);
+      }
+    }
   </script>
 </body>
 </html>

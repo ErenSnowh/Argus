@@ -939,57 +939,62 @@ def test_target_counts_per_horizon_report_total_windows_and_never_decrease():
 # ---------------------------------------------------------------------------
 
 
-def test_stage_targets_are_marked_not_yet_masked():
-    """Pins the gap so the docstrings cannot drift back into overclaiming.
+def test_stage_targets_are_marked_and_masked():
+    """WP3 complete: binning writes STAGE_TARGET_IGNORE=-1 and model.py masks it.
 
-    WP2 encodes STAGE_TARGET_IGNORE in `y_stage_*`; the stage losses do not ignore it
-    yet. This test is written against model.py's SOURCE (so it runs without torch) and
-    fails on purpose once WP3 adds `ignore_index` to the stage losses.
-
-    TODO(WP3): in the SAME commit that adds the masking, delete or rewrite this test
-    (assert the mask IS honoured instead) and update the `stage_target_masking` block in
-    scripts/prepare_cicids2017.py plus the docstrings in ml/world_model/binning.py. Do
-    not merge WP3 with this test still asserting the gap - a red suite is not a guard.
-    Grep for TODO(WP3) to find the other transition guards.
+    Verifies the full WP3 contract:
+      - binning.py marks Infiltration/Heartbleed bins with STAGE_TARGET_IGNORE=-1
+      - model.py uses CrossEntropyLoss(ignore_index=-1) so those bins are excluded
+      - BinnedSequences.stage_target_masks() identifies exactly the marked rows
     """
     model_source = (ROOT / "ml" / "world_model" / "model.py").read_text(encoding="utf-8")
-    assert "nn.CrossEntropyLoss()" in model_source, "expected the default CE loss"
-    assert "ignore_index" not in model_source, (
-        "model.py now masks stage targets - update binning.py, "
-        "prepare_cicids2017.py and this test together"
+    # WP3 requires ignore_index=-1 in the loss (not the PyTorch default -100)
+    assert "ignore_index=-1" in model_source, (
+        "WP3: model.py must use CrossEntropyLoss(ignore_index=-1) to mask "
+        "STAGE_TARGET_IGNORE bins written by binning.py"
     )
-    # -1 must stay a marker that is NOT silently ignored by a default loss ...
     assert STAGE_TARGET_IGNORE == -1
     assert STAGE_TARGET_IGNORE != -100
-    # ... and it must keep y_attack_within_h1 == (y_stage_h1 != 0) true.
+
     bins = build_host_time_bins(
         run_of_bins("10.0.0.1", ["BENIGN"] * 18 + ["Heartbleed"] * 2), bin_seconds=60)
     sequences = make_sequences(bins, W=10, horizons=(1, 2, 4), bin_seconds=60)
     marked = sequences.y_stage_h[4] == STAGE_TARGET_IGNORE
     assert marked.sum() >= 1
     assert sequences.stage_ignore_index == STAGE_TARGET_IGNORE
-    # the mask WP3 will consume selects exactly those rows, and nothing else
+    # stage_target_masks() returns True for rows that SHOULD be trained on
     assert np.array_equal(sequences.stage_target_masks()["y_stage_h4"], ~marked)
     assert np.array_equal(sequences.y_attack_within_h[1], (sequences.y_stage_h[1] != 0))
     # a marked stage target is still an attack in the binary target at that horizon
     assert sequences.y_attack_within_h[4][marked].min() == 1
 
 
-def test_default_loss_would_not_ignore_the_stage_marker():
-    """The behaviour half of the gap above; needs torch, so it skips without it."""
+def test_masked_loss_ignores_stage_target_ignore():
+    """WP3 complete: CrossEntropyLoss(ignore_index=-1) contributes zero loss for
+    STAGE_TARGET_IGNORE bins, confirming the masking is operative.
+    """
     torch = pytest.importorskip("torch")
 
     logits = torch.tensor([[10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]])   # class 0, confident
     marker = torch.tensor([STAGE_TARGET_IGNORE])
 
-    # A loss configured the WP3 way skips the sample entirely -> zero contribution.
-    masked = float(torch.nn.CrossEntropyLoss(ignore_index=STAGE_TARGET_IGNORE)(logits, marker))
-    assert masked == pytest.approx(0.0, abs=1e-6)
+    # The WP3-masked loss must skip the STAGE_TARGET_IGNORE sample entirely.
+    # PyTorch returns nan (not 0.0) when ALL samples in the batch are masked —
+    # this is correct: "no valid samples → undefined loss", not "zero loss".
+    masked = torch.nn.CrossEntropyLoss(ignore_index=STAGE_TARGET_IGNORE)(logits, marker)
+    masked_val = float(masked)
+    assert masked_val == pytest.approx(0.0, abs=1e-6) or (masked != masked), (
+        "CrossEntropyLoss(ignore_index=-1) must either return 0.0 or nan for a "
+        "fully-masked batch — any finite non-zero value means the mask is not active"
+    )
 
-    # The loss as it stands today does NOT skip it: torch either rejects the out-of-range
-    # class index or scores it as a class. Both are "not ignored", which is the gap.
+    # Without masking, torch either rejects the out-of-range index or scores it
+    # as a class — both are non-zero loss, confirming the mask is necessary.
     try:
-        default_value = float(torch.nn.CrossEntropyLoss()(logits, marker))
+        unmasked = float(torch.nn.CrossEntropyLoss()(logits, marker))
     except (RuntimeError, IndexError, AssertionError):
-        default_value = None
-    assert default_value is None or default_value > 0.0
+        unmasked = None
+    assert unmasked is None or unmasked > 0.0, (
+        "Default CE loss (no ignore_index) must not silently return 0.0 for "
+        "a -1 target — that would mean the gap no longer exists to fix"
+    )

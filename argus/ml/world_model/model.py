@@ -321,7 +321,11 @@ if TORCH_AVAILABLE:
             self.gamma = gamma
             self.delta = delta
             self.mse = nn.MSELoss()
-            self.ce = nn.CrossEntropyLoss()
+            # ignore_index=-1 masks the STAGE_TARGET_IGNORE marker written by
+            # binning.py for Infiltration/Heartbleed bins (D3 amendment). Using
+            # -100 (PyTorch default) means -1 is treated as a valid class index
+            # and corrupts the stage head on real CIC-IDS-2017 data.
+            self.ce = nn.CrossEntropyLoss(ignore_index=-1)
             self.bce = nn.BCEWithLogitsLoss()
 
         def forward(
@@ -365,6 +369,9 @@ if TORCH_AVAILABLE:
 
                 h_stage_logits_flat = h_stage_logits.reshape(-1, n_stages)
                 h_stage_targets_flat = h_stage_targets.reshape(-1)
+                # self.ce already has ignore_index=-1 (WP3 masking) so
+                # STAGE_TARGET_IGNORE bins are excluded from all stage losses,
+                # including the horizon heads, not just the primary head.
                 h_loss = self.ce(h_stage_logits_flat, h_stage_targets_flat) + \
                          self.bce(h_inf_logits, h_inf_targets)
                 horizon_loss = horizon_loss + h_loss

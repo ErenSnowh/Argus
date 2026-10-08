@@ -127,7 +127,7 @@ def train_world_model(
         max_rows=max_rows,
     )
 
-    # Train/test split (temporal — no future leakage)
+    # Train/test split (temporal - no future leakage)
     (X_train, yl_train, yi_train), (X_test, yl_test, yi_test) = \
         train_test_split_temporal(X, y_labels, y_infiltration, test_ratio=0.2)
 
@@ -343,13 +343,13 @@ def train_world_model(
 
     if validate_supervision:
         if supervision_passed:
-            print("\n  [✓] Multi-Task Supervision Validation PASSED:")
+            print("\n  [PASS] Multi-Task Supervision Validation PASSED:")
             print(f"      - All 3 prediction heads active with non-zero gradients")
-            print(f"      - State head loss: {history['state_loss'][0]:.4f} → {history['state_loss'][-1]:.4f}")
-            print(f"      - Stage head loss: {history['stage_loss'][0]:.4f} → {history['stage_loss'][-1]:.4f}")
-            print(f"      - Infiltration loss: {history['infiltration_loss'][0]:.4f} → {history['infiltration_loss'][-1]:.4f}")
+            print(f"      - State head loss: {history['state_loss'][0]:.4f} -> {history['state_loss'][-1]:.4f}")
+            print(f"      - Stage head loss: {history['stage_loss'][0]:.4f} -> {history['stage_loss'][-1]:.4f}")
+            print(f"      - Infiltration loss: {history['infiltration_loss'][0]:.4f} -> {history['infiltration_loss'][-1]:.4f}")
         else:
-            print(f"\n  [✗] Multi-Task Supervision Validation WARNING: {validation_reasons}")
+            print(f"\n  [WARN] Multi-Task Supervision Validation WARNING: {validation_reasons}")
 
     # Final metrics
     metrics = {

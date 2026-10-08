@@ -1,0 +1,160 @@
+{
+  "dataset": "synthetic",
+  "n_train": 400,
+  "n_test": 100,
+  "seq_len": 10,
+  "split_info": {
+    "train_sequences": 400,
+    "test_sequences": 100,
+    "seq_len": 10,
+    "n_features": 46,
+    "train_stages": [
+      "BENIGN",
+      "Reconnaissance",
+      "Initial Access",
+      "Credential Access",
+      "Lateral Movement",
+      "Command & Control",
+      "Exfiltration",
+      "Impact"
+    ],
+    "test_stages": [
+      "BENIGN",
+      "Reconnaissance",
+      "Initial Access",
+      "Credential Access",
+      "Lateral Movement",
+      "Command & Control",
+      "Exfiltration",
+      "Impact"
+    ],
+    "unseen_test_stages": [],
+    "train_infiltration_ratio": 0.8393,
+    "test_infiltration_ratio": 0.833,
+    "leakage_detected": false
+  },
+  "logistic_regression": {
+    "model_name": "Logistic Regression",
+    "accuracy": 0.997,
+    "f1_macro": 0.9961,
+    "f1_weighted": 0.997,
+    "precision_macro": 0.997,
+    "recall_macro": 0.9952,
+    "false_positive_rate": 0.0029,
+    "auc_roc": 1.0,
+    "pr_auc": 0.9999,
+    "per_class_f1": {
+      "BENIGN": 0.9956,
+      "Reconnaissance": 1.0,
+      "Initial Access": 0.973,
+      "Credential Access": 1.0,
+      "Lateral Movement": 1.0,
+      "Command & Control": 1.0,
+      "Exfiltration": 1.0,
+      "Impact": 1.0
+    },
+    "train_time_sec": 1.74,
+    "forecast_lead_time": {
+      "mean_lead_time_sec": 0.7,
+      "median_lead_time_sec": 0.0,
+      "per_stage_lead_time": {
+        "DDoS": 0.0,
+        "PortScan": 0.0,
+        "LateralMovement": 0.0,
+        "Botnet": 0.0,
+        "BruteForce": 4.3,
+        "Exfiltration": 0.0,
+        "WebAttack": 0.0
+      },
+      "total_attack_sequences": 91,
+      "forecasted_before_onset_count": 1,
+      "early_warning_rate": 0.011
+    }
+  },
+  "random_forest": {
+    "model_name": "Random Forest",
+    "accuracy": 1.0,
+    "f1_macro": 1.0,
+    "f1_weighted": 1.0,
+    "precision_macro": 1.0,
+    "recall_macro": 1.0,
+    "false_positive_rate": 0.0,
+    "auc_roc": 1.0,
+    "pr_auc": 1.0,
+    "per_class_f1": {
+      "BENIGN": 1.0,
+      "Reconnaissance": 1.0,
+      "Initial Access": 1.0,
+      "Credential Access": 1.0,
+      "Lateral Movement": 1.0,
+      "Command & Control": 1.0,
+      "Exfiltration": 1.0,
+      "Impact": 1.0
+    },
+    "train_time_sec": 0.57,
+    "forecast_lead_time": {
+      "mean_lead_time_sec": 0.0,
+      "median_lead_time_sec": 0.0,
+      "per_stage_lead_time": {
+        "DDoS": 0.0,
+        "PortScan": 0.0,
+        "LateralMovement": 0.0,
+        "Botnet": 0.0,
+        "BruteForce": 0.0,
+        "Exfiltration": 0.0,
+        "WebAttack": 0.0
+      },
+      "total_attack_sequences": 91,
+      "forecasted_before_onset_count": 0,
+      "early_warning_rate": 0.0
+    }
+  },
+  "world_model": {
+    "model_name": "World Model Transformer",
+    "accuracy": 0.997,
+    "f1_macro": 0.9958,
+    "f1_weighted": 0.997,
+    "precision_macro": 0.9956,
+    "recall_macro": 0.996,
+    "false_positive_rate": 0.0029,
+    "auc_roc": 1.0,
+    "pr_auc": 0.9999,
+    "per_class_f1": {
+      "BENIGN": 0.9971,
+      "Reconnaissance": 1.0,
+      "Initial Access": 0.9821,
+      "Credential Access": 0.9943,
+      "Lateral Movement": 0.9929,
+      "Command & Control": 1.0,
+      "Exfiltration": 1.0,
+      "Impact": 1.0
+    },
+    "train_time_sec": 0.1,
+    "model_params": 619803,
+    "forecast_lead_time": {
+      "mean_lead_time_sec": 0.7,
+      "median_lead_time_sec": 0.0,
+      "per_stage_lead_time": {
+        "DDoS": 0.0,
+        "PortScan": 0.0,
+        "LateralMovement": 0.0,
+        "Botnet": 0.0,
+        "BruteForce": 4.3,
+        "Exfiltration": 0.0,
+        "WebAttack": 0.0
+      },
+      "total_attack_sequences": 91,
+      "forecasted_before_onset_count": 1,
+      "early_warning_rate": 0.011
+    }
+  },
+  "comparison": {
+    "wm_vs_lr_f1": -0.0003,
+    "wm_vs_rf_f1": -0.0042,
+    "wm_vs_best_baseline_f1": -0.0042,
+    "wm_vs_best_baseline_accuracy": -0.003,
+    "wm_vs_best_baseline_fpr_reduction": -0.0029,
+    "winner": "Random Forest"
+  },
+  "total_time_sec": 2.75
+}

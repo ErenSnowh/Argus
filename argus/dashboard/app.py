@@ -109,13 +109,22 @@ def health():
         "world_model_source": (
             checkpoint.name if checkpoint.exists() else None
         ),
+        "offline": config.is_offline(),
     }
 
 
 @app.get("/api/config")
 def get_config():
-    """Tell the frontend whether a Gemini API key is available for live mode."""
-    return {"has_api_key": config.has_api_key()}
+    """Tell the frontend the live-mode posture: whether a Gemini key is
+    available, whether OFFLINE air-gap mode is on, and which models live mode
+    would use (so the UI never hard-codes a stale model name)."""
+    import os as _os
+    return {
+        "has_api_key": config.has_api_key(),
+        "offline": config.is_offline(),
+        "fast_model": _os.environ.get("GOOGLE_GENAI_FAST_MODEL", "gemini-2.5-flash-lite"),
+        "deep_model": _os.environ.get("GOOGLE_GENAI_DEEP_MODEL", "gemini-2.5-flash"),
+    }
 
 
 @app.get("/api/metrics")

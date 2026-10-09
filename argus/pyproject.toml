@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "argus-soc-agent"
 version = "0.1.0"
-description = "ARGUS: a multi-agent SOC co-pilot built with Google ADK + MCP for the Kaggle 5-Day AI Agents Intensive capstone"
+description = "ARGUS: AI network-attack forecasting + multi-agent SOC co-pilot (SIH 2026 PS 26153) — Temporal Transformer world model, counterfactual simulator, CERT-In/NCIIPC reporting, on a Google ADK + MCP scaffold"
 requires-python = ">=3.10"
 dependencies = [
     "google-adk>=1.0",

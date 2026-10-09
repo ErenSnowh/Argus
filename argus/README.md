@@ -2,7 +2,9 @@
 
 **A multi-agent SOC co-pilot that detects, enriches, investigates, and reports network intrusions — built with Google ADK, a real MCP server, and security-by-design at every layer.**
 
-> Built for the **Kaggle 5-Day AI Agents Intensive: Vibe Coding Course with Google** capstone — Track: **Agents for Business** (crossover: Agents for Good — protecting shared digital infrastructure).
+> **Built for Smart India Hackathon 2026 — Problem Statement 26153** (*AI-based Network Attack Forecasting from Network Traffic Data using World Models*; client **NTRO / NCIIPC**).
+>
+> The SIH-specific core was built for this problem statement: the Temporal Transformer **world model** + K-step kill-chain forecaster, the **counterfactual** mitigation simulator, the **CERT-In / NCIIPC** statutory reporting, and the forecasting **dashboard**. The multi-agent + MCP-server scaffold it builds on began as a Google ADK project and was extended here.
 
 [![Tests](https://img.shields.io/badge/tests-164%20collected-brightgreen)]() [![Python](https://img.shields.io/badge/python-3.10%2B-blue)]() [![License](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
@@ -114,7 +116,9 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-164 tests collected (`pytest --collect-only -q`) covering the detector, MITRE
+164 tests collected (`pytest --collect-only -q`); a normal run is **163 passed,
+1 skipped** (the EICAR malware-hash fixture skips when host AV intercepts the
+string). They cover the detector, MITRE
 mapping, IOC enrichment, PCAP forensics, playbook generation, the dashboard's
 API error handling, the CIC-IDS-2017 binning pipeline, packet-bin extraction,
 and every security guardrail (redaction, allowlist enforcement,
@@ -147,7 +151,7 @@ ml/             Synthetic CICIDS2017-style data generator + Random Forest traini
 security/       Redaction, tool allowlists, prompt-injection sanitizing, hash-chained audit log
 cli/            `argus` Agent Skills CLI (with --live mode)
 dashboard/      FastAPI backend + dark-mode dashboard (offline + live Gemini modes)
-deploy/         Dockerfile, docker-compose, Cloud Run instructions
+deploy/         docker-compose + Cloud Run notes (the image Render builds is the repo-root Dockerfile)
 docs/           Architecture deep-dive
 tests/          pytest suite (164 collected, offline)
 scripts/        train_model.py, make_sample_pcap.py
@@ -181,5 +185,5 @@ scripts/        train_model.py, make_sample_pcap.py
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](../LICENSE).
 

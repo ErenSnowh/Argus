@@ -6,8 +6,9 @@ ARGUS Agent Skills CLI -- each subcommand is a discrete, independently
 invokable "agent skill" that wraps one stage of the SOC pipeline, so an
 analyst (or another automation, e.g. a SOAR playbook or cron job) can call
 exactly the capability they need without spinning up the full multi-agent
-session. This is the capstone rubric's "Agent skills (e.g. Agents CLI)"
-artifact.
+session. Each subcommand maps to one stage of the SIH 2026 PS-26153
+forecasting-and-response pipeline. (The multi-skill CLI pattern began as a
+Google ADK "agent skills" artifact and was extended for this problem statement.)
 
 The Gemini API key is auto-loaded — no manual setup needed.
 

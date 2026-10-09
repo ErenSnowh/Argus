@@ -12,12 +12,23 @@
 
 ---
 
+[![CI](https://github.com/ErenSnowh/Argus/actions/workflows/ci.yml/badge.svg)](https://github.com/ErenSnowh/Argus/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![PyTorch](https://img.shields.io/badge/PyTorch-Transformer-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)](https://pytorch.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Dashboard-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![MCP](https://img.shields.io/badge/MCP-Tool_Server-7C3AED?style=for-the-badge)](https://modelcontextprotocol.io)
 [![MITRE ATT&CK](https://img.shields.io/badge/MITRE-ATT%26CK_v14-FF6B6B?style=for-the-badge)](https://attack.mitre.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](argus/LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
+
+<!--
+  TODO before submission: paste your real demo-video URL in place of the "#"
+  in the Demo Video link below. The Live Demo URL is the one Render assigns to
+  the service named in render.yaml (argus-soc-agent); update it if you deploy
+  under a different name.
+-->
+### 🔗 [🚀 Live Demo](https://argusforensics.onrender.com) · [🎥 Demo Video](#) · [💻 Source](https://github.com/ErenSnowh/Argus)
+
+<sub>⚠️ The live demo runs on Render's **free tier** — the first request after the service has been idle can take **30–60 s to cold-start** (the app isn't down, it's waking up). It serves the CPU neural engine where memory allows and falls back to the heuristic prior otherwise.</sub>
 
 [Quick Start](#-quick-start) · [Architecture](#-system-architecture) · [World Model](#-world-model-engine) · [Datasets](#%EF%B8%8F-public-datasets) · [Dashboard](#%EF%B8%8F-web-dashboard) · [Compliance](#%EF%B8%8F-statutory-compliance) · [API Reference](#-cli--api-reference)
 
@@ -71,17 +82,19 @@ flowchart TD
 
     subgraph AGENTS["🤖 Multi-Agent Swarm (Google ADK)"]
         TRIAGE["Triage Agent"]
-        THREAT["ThreatIntel Agent"]
+        ENRICH["Enrichment Agent"]
         FORENSIC["Forensics Agent"]
         REMED["Remediation Agent"]
         COMPLY["Compliance Agent"]
-        TRIAGE --> THREAT & FORENSIC
-        THREAT & FORENSIC --> REMED
+        REPORT["Report Agent"]
+        TRIAGE --> ENRICH & FORENSIC
+        ENRICH & FORENSIC --> REMED
         REMED --> COMPLY
+        COMPLY --> REPORT
     end
 
-    subgraph MCP["🔧 MCP Tool Server"]
-        TOOLS["classify_flow · forecast_infiltration<br/>enrich_detection_with_kb · analyze_pcap<br/>generate_certin_report · generate_nciipc_report"]
+    subgraph MCP["🔧 MCP Tool Server (19 tools)"]
+        TOOLS["classify_flow · forecast_infiltration<br/>enrich_with_knowledge_base · analyze_pcap_summary<br/>generate_certin_report · generate_nciipc_report<br/>+ 13 more (see API Reference)"]
         GUARD["Security Guardrails<br/>PII Redaction · RBAC · Prompt Injection<br/>SHA-256 HMAC Audit Chain"]
     end
 
@@ -155,20 +168,24 @@ Where $\alpha = 0.25$, $\beta = 0.30$, $\gamma = 0.25$, $\delta = 0.20$ (code de
 
 ### Training Status & Benchmark Numbers
 
-No trained world-model checkpoint ships in this repository yet, so **benchmark
-metrics are not yet measured**. When training runs (WP5/WP6 in
-[docs/plan/world-model-core.md](docs/plan/world-model-core.md)), the results
-table will be rendered from a committed `ml/pretrained/benchmark_results.json`
-together with its provenance block (dataset, git SHA, split protocol) — never
-typed by hand.
+A world-model checkpoint **trained on synthetic sequences** now ships in
+`argus/ml/pretrained/` (`world_model.pt` + `benchmark_results.json` +
+`PROVENANCE.md`), and the image installs the CPU build of PyTorch, so the
+neural engine runs out of the box. The committed benchmark is a **synthetic-data
+evaluation** (see `PROVENANCE.md` for n, split protocol, and git SHA) — a
+correctness/plumbing check, **not** a result on real traffic. The real
+CIC-IDS-2017 training/benchmark (WP5/WP6 in
+[docs/plan/world-model-core.md](docs/plan/world-model-core.md)) is **not done
+yet**; those numbers are deliberately not quoted here, and any slide deck should
+stay on the synthetic/offline figures until that run lands.
 
 Current, honest status of the two engines:
 
 | Engine | Status |
 |--------|--------|
 | Random Forest flow classifier | Trained during the Docker build / `scripts/train_model.py` from synthetic fixtures — a demo detector, not a benchmarked result |
-| World Model Transformer | Architecture implemented and unit-tested; **not yet trained** (PyTorch is optional and not installed by default) |
-| Heuristic kill-chain prior | Active fallback — this is what the public demo serves today (`torch_available: false` on the deployed instance) |
+| World Model Transformer | Architecture implemented and unit-tested. A checkpoint **trained on synthetic sequences** ships in `argus/ml/pretrained/world_model.pt`, and the CPU build of PyTorch is installed in the image, so the deployed demo loads it and reports `engine: "neural"` where memory allows. It is **not yet trained on real CIC-IDS-2017 data** — those benchmark numbers are intentionally not claimed. |
+| Heuristic kill-chain prior | Automatic fallback when PyTorch or the checkpoint can't load (a fresh clone without torch, air-gapped CI, or a memory-constrained free-tier instance). A coarse hand-set prior, not a measurement. |
 
 To reproduce every number this README does (and doesn't) claim, see
 [docs/EVALUATION.md](docs/EVALUATION.md).
@@ -384,14 +401,58 @@ python -m cli.argus_cli audit verify
 
 ### MCP Tools
 
+The FastMCP server in `mcp_server/server.py` registers **19 tools**. The same
+functions back both the offline dashboard (direct Python calls) and the live
+ADK pipeline (over the MCP protocol).
+
+**Detection & scoring**
+
 | Tool | Description |
 |------|-------------|
-| `classify_flow` | Classify a network flow with RF + SHAP explanation |
-| `forecast_infiltration` | K-step World Model attack progression forecast |
-| `enrich_detection_with_kb` | ATT&CK technique + CAPEC + CVE enrichment |
-| `analyze_pcap` | Deep PCAP analysis with DNS tunneling detection |
-| `generate_certin_report` | CERT-In statutory incident report (6-hour SLA) |
-| `generate_nciipc_report` | NCIIPC CII advisory for designated sectors |
+| `classify_flow` | Classify a network flow with the RF detector |
+| `classify_flow_explained` | Classify + per-feature SHAP attribution |
+| `compute_threat_score` | Composite multi-factor threat gauge |
+| `correlate_alerts` | Multi-flow campaign correlation |
+
+**Forecasting (World Model)**
+
+| Tool | Description |
+|------|-------------|
+| `forecast_infiltration` | K-step kill-chain / infiltration forecast |
+| `forecast_counterfactual` | Action-conditioned "what if I block X?" simulation |
+| `get_world_model_status` | Checkpoint status, engine (neural/heuristic), provenance |
+
+**Threat intel & knowledge base**
+
+| Tool | Description |
+|------|-------------|
+| `lookup_mitre_attack` | Map a detection label to ATT&CK techniques |
+| `enrich_ioc` | IP/domain/hash reputation (VirusTotal live, or offline cache) |
+| `enrich_with_knowledge_base` | ATT&CK + CAPEC + CVE enrichment for a detection |
+| `lookup_cve_nvd` | Live CVE lookup via the NIST NVD 2.0 API |
+| `lookup_attack_technique_detail` | Full detail for one ATT&CK technique ID |
+
+**Forensics & files**
+
+| Tool | Description |
+|------|-------------|
+| `analyze_pcap_summary` | PCAP summary + DNS-tunneling / beaconing signals |
+| `verify_file_hash` | Hash a file and check it against known-bad hashes |
+
+**Remediation & statutory compliance**
+
+| Tool | Description |
+|------|-------------|
+| `propose_playbook` | Propose-only remediation playbook (never executes) |
+| `generate_certin_report` | CERT-In incident report (Section 70B, 6-hour SLA) |
+| `generate_nciipc_report` | NCIIPC CII advisory (Section 70A, 6 sectors) |
+
+**Meta / status**
+
+| Tool | Description |
+|------|-------------|
+| `list_supported_datasets` | List the 8 supported dataset loaders |
+| `get_knowledge_base_status` | ATT&CK / CAPEC / CVE cache load status |
 
 ### REST API Endpoints
 
@@ -423,8 +484,10 @@ ARGUS implements defense-in-depth to prevent exploitation of the AI system:
 
 ## 🧪 Testing
 
-The suite collects **164 tests** across 3 modules (count from
-`pytest --collect-only -q` — rerun it to verify):
+The suite collects **164 tests** across 3 modules; a normal run is **163 passed,
+1 skipped** (the EICAR malware-hash fixture skips when host AV intercepts it).
+Counts come from `pytest --collect-only -q` / a full `pytest tests -q` — rerun
+to verify:
 
 ```bash
 cd argus
@@ -469,7 +532,7 @@ Argus/
     ├── requirements.txt              # Pip requirements
     ├── agents/                       # Multi-Agent Swarm (Google ADK)
     │   ├── orchestrator.py           #   Swarm coordinator & investigation pipeline
-    │   ├── sub_agents.py             #   Triage, Enrichment, Forensics, Playbook, Report
+    │   ├── sub_agents.py             #   Triage, Enrichment, Forensics, Remediation, Compliance, Report
     │   ├── mcp_connection.py         #   MCP server connection manager
     │   ├── run_live.py               #   Live agent runner
     │   └── run_offline_demo.py       #   Offline deterministic demo
@@ -512,7 +575,7 @@ Argus/
     └── tests/
         ├── test_core.py              # Core pipeline, agents, guardrails, dashboard
         ├── test_pcap_bins.py         # Packet-bin extraction
-        └── test_prepare_cicids2017.py# Binned CIC-IDS-2017 pipeline (164 tests total)
+        └── test_prepare_cicids2017.py# Binned CIC-IDS-2017 pipeline (164 collected; 163 pass, 1 skips)
 ```
 
 ---
@@ -528,17 +591,25 @@ docker run -p 8000:8000 argus
 
 ### Render (Free Tier)
 
-The included `render.yaml` provides zero-config cloud deployment:
+The included `render.yaml` provides zero-config cloud deployment (it builds the
+root `Dockerfile` with the repo root as context):
 
 ```bash
 # Automatic: push to GitHub → Render auto-deploys
 ```
 
+> **Free-tier cold starts:** Render spins the free instance down after ~15 min
+> of inactivity. The next request then takes **30–60 s** while it wakes up — the
+> app isn't down, it's cold-starting. Free instances also cap at **512 MB RAM**:
+> if PyTorch + the checkpoint don't fit, the predictor automatically serves the
+> heuristic prior instead of the neural engine (the `/api/health` and
+> `/api/forecast` responses always say which engine answered).
+
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License — see [LICENSE](argus/LICENSE) for details.
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 

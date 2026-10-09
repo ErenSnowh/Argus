@@ -24,6 +24,17 @@ import httpx
 VT_API_KEY = os.environ.get("VIRUSTOTAL_API_KEY", "").strip()
 VT_BASE_URL = "https://www.virustotal.com/api/v3"
 
+
+def _offline() -> bool:
+    """True when ARGUS is pinned to air-gap/offline mode (OFFLINE=1).
+
+    Read from the environment directly to stay decoupled from config import
+    ordering. In offline mode the VirusTotal HTTP path below is suppressed even
+    if a key is set, so no outbound call ever leaves the box.
+    """
+    val = (os.environ.get("OFFLINE") or os.environ.get("ARGUS_OFFLINE") or "").strip().lower()
+    return val in {"1", "true", "yes", "on"}
+
 # Small local cache standing in for a real threat-intel feed in demo mode.
 # IPs/domains here are well-known, publicly-documented test/research IOCs
 # (e.g. from public CTF writeups and threat-intel blogs) -- not pulled from
@@ -63,7 +74,7 @@ class IOCResult:
 def enrich_ioc(indicator: str) -> IOCResult:
     start = time.time()
 
-    if VT_API_KEY:
+    if VT_API_KEY and not _offline():
         try:
             with httpx.Client(timeout=8.0) as client:
                 resp = client.get(

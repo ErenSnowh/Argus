@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta content="width=device-width, initial-scale=1.0" name="viewport">
-  <title>ARGUS — Autonomous SOC Co-Pilot &amp; World Model Attack Forecaster (NTRO // PS-26153)</title>
+  <title>ARGUS — Autonomous SOC Co-Pilot &amp; World Model Attack Forecaster (SIH 2026 · PS 26153)</title>
   <meta name="description" content="ARGUS: Autonomous Network Attack Forecasting from Network Traffic Data using Continuous-Latent World Models, MITRE ATT&CK, Multi-Agent Swarm, and CERT-In Compliance.">
   <link rel="icon" type="image/svg+xml" href="/favicon.ico">
   
@@ -88,7 +88,7 @@
           <div class="flex flex-col">
             <div class="flex items-center gap-1.5">
               <span class="font-headline-sm font-bold tracking-tight text-primary text-base">ARGUS</span>
-              <span class="px-1.5 py-0.2 rounded bg-surface-container font-badge-micro text-[10px] text-primary font-semibold uppercase">NTRO // PS-26153</span>
+              <span class="px-1.5 py-0.2 rounded bg-surface-container font-badge-micro text-[10px] text-primary font-semibold uppercase">SIH 2026 · PS 26153</span>
             </div>
             <span class="font-badge-micro text-[9px] text-outline tracking-wider uppercase">Autonomous SOC Co-Pilot &amp; World Model</span>
           </div>
@@ -135,8 +135,8 @@
 
         <div class="flex items-center gap-2 pl-2 border-l border-border-subtle">
           <div class="hidden md:flex flex-col text-right">
-            <span class="font-code-mono text-xs font-semibold text-on-surface">CDR. V. SHARMA</span>
-            <span class="font-badge-micro text-[9px] text-status-high uppercase font-bold">TIER 3 / NTRO CYBER</span>
+            <span class="font-code-mono text-xs font-semibold text-on-surface">SOC ANALYST</span>
+            <span class="font-badge-micro text-[9px] text-outline uppercase font-bold">DEMO SESSION</span>
           </div>
           <div class="w-7 h-7 rounded-full bg-primary/20 border border-primary flex items-center justify-center text-primary">
             <span class="material-symbols-outlined text-[16px]">shield_person</span>
@@ -178,6 +178,7 @@
     <!-- KPI Metric Ribbon -->
     <div class="h-11 w-full px-4 bg-surface-raised border-b border-border-subtle flex items-center justify-between overflow-x-auto text-[11px] font-telemetry-data gap-4">
       <div class="flex items-center gap-4 shrink-0">
+        <span class="px-1.5 py-0.2 rounded bg-status-high/20 text-status-high text-[10px] font-bold uppercase shrink-0" title="These ribbon counters are illustrative placeholders, not live measurements.">DEMO DATA</span>
         <div class="flex items-center gap-1.5">
           <span class="text-outline uppercase font-bold text-[10px]">ACTIVE ALARMS:</span>
           <span class="text-on-surface font-semibold font-code-mono" id="kpi-total-alarms">1,420</span>
@@ -273,7 +274,7 @@
       <div class="w-full bg-surface-container h-1.5 rounded-full overflow-hidden">
         <div class="bg-status-critical h-full w-4/5 animate-pulse"></div>
       </div>
-      <span class="text-[9px] text-outline">NTRO DISPATCH AUTH REQ</span>
+      <span class="text-[9px] text-outline">DISPATCH AUTH REQUIRED</span>
     </div>
   </aside>
 
@@ -614,7 +615,7 @@
             <div class="p-3 rounded bg-surface-overlay border border-primary/40 flex flex-col gap-2">
               <div class="flex items-center justify-between">
                 <span class="text-[10px] font-badge-micro text-primary font-bold uppercase">RECOMMENDED ACTION</span>
-                <span class="text-[10px] font-badge-micro text-status-safe font-bold">ΔR: -81.2%</span>
+                <span class="text-[10px] font-badge-micro text-status-safe font-bold" title="Illustrative demo scenario value">ΔR: -81.2% (demo)</span>
               </div>
               <span class="font-bold text-xs text-on-surface">Enforce BLOCK_SRC via Perimeter IPTables</span>
               <p class="text-[11px] text-on-surface-variant">Zeroes attacker fanout and stops lateral SMB exfiltration before DC hash extraction.</p>
@@ -633,7 +634,7 @@
             <!-- Fast Investigation Trigger -->
             <div class="p-2.5 rounded bg-surface-panel border border-border-subtle flex flex-col gap-1.5">
               <span class="text-[10px] font-badge-micro text-outline uppercase font-bold">Autonomous Swarm Investigation</span>
-              <p class="text-[11px] text-outline">Trigger Gemini 1.5 multi-agent swarm to conduct end-to-end triage and generate SOAR containment playbook.</p>
+              <p class="text-[11px] text-outline">Trigger the Gemini-powered (2.5 Flash) multi-agent swarm to conduct end-to-end triage and generate a SOAR containment playbook.</p>
               <button class="w-full py-2 px-3 rounded bg-primary-container hover:bg-primary text-primary hover:text-surface-base border border-primary/50 font-code-mono text-xs font-bold transition-all flex items-center justify-center gap-1.5" onclick="runLiveSwarm()">
                 <span class="material-symbols-outlined text-[15px]">play_arrow</span>
                 <span>Launch Swarm Triage</span>
@@ -665,6 +666,7 @@
         </div>
 
         <!-- Outcome Metrics Ribbon -->
+        <p class="text-[10px] font-telemetry-data text-status-high uppercase font-bold tracking-wider">DEMO DATA — illustrative defaults shown until you select a candidate below; the numbers then come from the real counterfactual engine (ml/world_model/counterfactual.py).</p>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div class="p-3 rounded bg-surface-raised border border-border-subtle flex flex-col justify-between">
             <span class="text-[10px] font-badge-micro text-outline uppercase tracking-wider">Baseline Apex Risk (No Action)</span>
@@ -682,7 +684,7 @@
           <div class="p-3 rounded bg-surface-raised border border-status-safe/50 flex flex-col justify-between">
             <span class="text-[10px] font-badge-micro text-status-safe uppercase tracking-wider font-bold">Mitigation Risk Delta (ΔR)</span>
             <div class="my-1 font-display-xl text-display-xl text-status-safe font-bold" id="sandbox-risk-delta">-81.2%</div>
-            <span class="text-[11px] text-outline">Direct Risk Reduction Verified</span>
+            <span class="text-[11px] text-outline">From counterfactual engine (select to run)</span>
           </div>
 
           <div class="p-3 rounded bg-surface-raised border border-secondary/50 flex flex-col justify-between">
@@ -776,7 +778,7 @@
                 <polygon id="sandbox-delta-area" points="20,150 120,110 240,75 360,45 480,20 480,168 360,165 240,160 120,155" fill="rgba(94, 234, 212, 0.07)"></polygon>
               </svg>
               <div class="absolute top-2 right-3 font-code-mono text-xs font-bold text-status-safe bg-surface-base/80 px-2 py-0.5 rounded border border-status-safe/40" id="delta-callout">
-                NET RISK REDUCTION: -81.2%
+                SELECT A CANDIDATE TO SIMULATE
               </div>
             </div>
           </div>
@@ -838,7 +840,7 @@
             <span class="material-symbols-outlined text-secondary text-[22px]">hub</span>
             <div class="flex flex-col">
               <h3 class="font-headline-sm font-semibold text-on-surface text-base">AUTONOMOUS MULTI-AGENT SWARM REASONING TERMINAL</h3>
-              <span class="text-[10px] font-telemetry-data text-outline">Collaborative Orchestration: Google ADK + Gemini 1.5 Real-Time Threat Hunting</span>
+              <span class="text-[10px] font-telemetry-data text-outline">Collaborative Orchestration: Google ADK + Gemini (2.5 Flash, env-configured) Real-Time Threat Hunting</span>
             </div>
           </div>
           <div class="flex items-center gap-2">
@@ -986,8 +988,8 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
               <div class="p-2.5 rounded bg-surface-panel border border-border-subtle flex flex-col gap-0.5">
                 <span class="text-[10px] text-outline uppercase font-bold">1. Reporting Entity</span>
-                <span class="font-code-mono font-bold text-on-surface">National Critical Infrastructure Protection Node #4</span>
-                <span class="text-[10px] text-outline">Auth Tag: NTRO-ND4-CYBER-OPS</span>
+                <span class="font-code-mono font-bold text-on-surface">&lt;Sample Reporting Entity — demo&gt;</span>
+                <span class="text-[10px] text-outline">Sample draft — not an official filing</span>
               </div>
 
               <div class="p-2.5 rounded bg-surface-panel border border-border-subtle flex flex-col gap-0.5">
@@ -1154,7 +1156,7 @@
       <span><kbd class="px-1 py-0.2 rounded bg-surface-panel border border-border-subtle text-on-surface">A</kbd> Approve SOAR</span>
     </div>
     <div class="flex items-center gap-2 text-[10px]">
-      <span>SMART INDIA HACKATHON 2026 // NTRO PS-26153</span>
+      <span>SMART INDIA HACKATHON 2026 · PROBLEM STATEMENT 26153</span>
     </div>
   </footer>
 
@@ -1346,62 +1348,70 @@
 
     // -------------------------------------------------------------------------
     // Counterfactual Sandbox Interactivity
+    //
+    // The risk numbers (baseline, mitigated, delta, recommended action) are read
+    // live from the counterfactual engine (ml/world_model/counterfactual.py) via
+    // /api/forecast/counterfactual -- nothing here is hardcoded. The only
+    // per-action literals are the illustrative SOAR command templates and the
+    // fan-out figures, which the API does not return; they are labelled as
+    // illustrative in the UI.
     // -------------------------------------------------------------------------
+    // Illustrative SOAR command / blast-radius templates per action. These are
+    // examples of what the generated containment step would look like, not values
+    // measured by the engine.
+    const SOAR_TEMPLATES = {
+      NO_ACTION:      { fanout: "no change", cmd: "# No containment rule committed" },
+      BLOCK_SRC:      { fanout: "source isolated", cmd: "iptables -A INPUT -s <attacker_src_ip> -j DROP" },
+      BLOCK_DST_PORT: { fanout: "service port closed", cmd: "iptables -A FORWARD -p tcp --dport <dst_port> -j DROP" },
+      THROTTLE:       { fanout: "rate-limited", cmd: "tc qdisc add dev eth0 root tbf rate 100kbit latency 50ms burst 1540" },
+    };
+
     async function selectIntervention(action) {
       document.getElementById('curve-legend-action').textContent = action;
+
+      // Illustrative SOAR preview (engine does not emit the command itself).
+      const tpl = SOAR_TEMPLATES[action] || SOAR_TEMPLATES.NO_ACTION;
+      document.getElementById('f-fanout-sim').textContent = tpl.fanout;
+      document.getElementById('f-fanout-delta').textContent = "illustrative";
+      document.getElementById('soar-command-preview').textContent = tpl.cmd;
+
       try {
         const res = await fetch(API + "/api/forecast/counterfactual", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ k_steps: 5, actions: [action] })
         });
-        if (res.ok) {
-          const data = await res.json();
-          const mit = data.mitigations ? data.mitigations[action] : null;
-          if (mit) {
-            document.getElementById('sandbox-mitigated-risk').textContent = `${(mit.risk * 100).toFixed(1)}%`;
-            document.getElementById('sandbox-risk-delta').textContent = `${(mit.risk_delta * 100).toFixed(1)}%`;
-            document.getElementById('delta-callout').textContent = `NET RISK REDUCTION: ${(mit.risk_delta * 100).toFixed(1)}%`;
-          }
+        if (!res.ok) {
+          showToast(`Counterfactual engine unavailable (HTTP ${res.status})`, "error");
+          return;
         }
-      } catch(e) {}
+        const data = await res.json();
+        const mit = data.mitigations ? data.mitigations[action] : null;
 
-      if (action === 'NO_ACTION') {
-        document.getElementById('sandbox-mitigated-risk').textContent = "95.4%";
-        document.getElementById('sandbox-risk-delta').textContent = "0.0%";
-        document.getElementById('delta-callout').textContent = "NET RISK REDUCTION: 0.0%";
-        document.getElementById('f-fanout-sim').textContent = "142 hosts";
-        document.getElementById('f-fanout-delta').textContent = "0%";
-        document.getElementById('soar-command-preview').textContent = "# No iptables rule committed";
-      } else if (action === 'BLOCK_SRC') {
-        document.getElementById('sandbox-mitigated-risk').textContent = "14.2%";
-        document.getElementById('sandbox-risk-delta').textContent = "-81.2%";
-        document.getElementById('delta-callout').textContent = "NET RISK REDUCTION: -81.2%";
-        document.getElementById('f-fanout-sim').textContent = "0 hosts";
-        document.getElementById('f-fanout-delta').textContent = "-100%";
-        document.getElementById('soar-command-preview').textContent = "iptables -A INPUT -s 185.220.101.45 -j DROP";
-      } else if (action === 'BLOCK_DST_PORT') {
-        document.getElementById('sandbox-mitigated-risk').textContent = "41.2%";
-        document.getElementById('sandbox-risk-delta').textContent = "-54.2%";
-        document.getElementById('delta-callout').textContent = "NET RISK REDUCTION: -54.2%";
-        document.getElementById('f-fanout-sim').textContent = "48 hosts";
-        document.getElementById('f-fanout-delta').textContent = "-66%";
-        document.getElementById('soar-command-preview').textContent = "iptables -A FORWARD -p tcp --dport 445 -j DROP";
-      } else if (action === 'THROTTLE') {
-        document.getElementById('sandbox-mitigated-risk').textContent = "52.1%";
-        document.getElementById('sandbox-risk-delta').textContent = "-43.3%";
-        document.getElementById('delta-callout').textContent = "NET RISK REDUCTION: -43.3%";
-        document.getElementById('f-fanout-sim').textContent = "14 hosts";
-        document.getElementById('f-fanout-delta').textContent = "-90%";
-        document.getElementById('soar-command-preview').textContent = "tc qdisc add dev eth0 root tbf rate 100kbit latency 50ms burst 1540";
+        // Baseline risk is engine-computed and the same for every action.
+        if (typeof data.baseline_risk === 'number') {
+          document.getElementById('sandbox-baseline-risk').textContent = `${(data.baseline_risk * 100).toFixed(1)}%`;
+        }
+        if (data.recommended_action) {
+          document.getElementById('sandbox-recommended').textContent = data.recommended_action;
+        }
+        if (mit) {
+          document.getElementById('sandbox-mitigated-risk').textContent = `${(mit.risk * 100).toFixed(1)}%`;
+          document.getElementById('sandbox-risk-delta').textContent = `${(mit.risk_delta * 100).toFixed(1)}%`;
+          document.getElementById('delta-callout').textContent = `NET RISK REDUCTION: ${(mit.risk_delta * 100).toFixed(1)}%`;
+          showToast(`Counterfactual simulated: ${action}`, "success");
+        } else {
+          showToast(`Engine returned no result for ${action}`, "error");
+        }
+      } catch(e) {
+        showToast("Could not reach the counterfactual engine", "error");
       }
-      showToast(`Simulated Intervention: ${action}`, "success");
     }
 
     function enforceMitigation() {
-      showToast("Mitigation authorized! Appending signature to SHA-256 Hash Chain...", "success");
+      showToast("Demo: authorizing mitigation and appending a signature to the SHA-256 audit chain...", "success");
       setTimeout(() => {
-        showToast("Firewall containment rule enforced via SOAR! Canary auto-revert set to 15m.", "success");
+        showToast("Demo: containment playbook staged (no live firewall change is made in this demo).", "success");
       }, 1200);
     }
 
@@ -1409,7 +1419,7 @@
     // Multi-Agent Swarm Actions
     // -------------------------------------------------------------------------
     function runLiveSwarm() {
-      showToast("Launching Autonomous Gemini 1.5 + ADK Swarm Triage...", "info");
+      showToast("Launching the Gemini + ADK agent swarm...", "info");
       switchTab('multi-agent-swarm');
     }
 

@@ -4,7 +4,9 @@ server.py
 ARGUS MCP Server -- exposes the SOC toolset as standard MCP tools so any
 MCP-compatible client (Google ADK agents, Claude, a CLI, a future SIEM
 plugin) can call them over a uniform protocol instead of hard-coded function
-calls. This is the "MCP Server" key-concept artifact for the capstone rubric.
+calls. The MCP-server scaffold began as a Google ADK project artifact; the
+forecasting and CERT-In/NCIIPC statutory-reporting tools were added for SIH
+2026 PS-26153.
 
 Tools exposed:
   classify_flow            -- run a network flow through the RF detector

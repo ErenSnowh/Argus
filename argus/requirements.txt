@@ -13,4 +13,10 @@ pytest>=8.0
 # Dataset validation only: reads the CIC-IDS-2017 TrafficLabelling parquet
 # mirror in argus/data/raw/cicids2017/ (scripts/validate_cicids2017.py).
 pyarrow>=17.0
+# World model inference: serves the committed neural Transformer checkpoint
+# (ml/pretrained/world_model.pt) so the live demo reports engine="neural"
+# instead of the heuristic fallback. On Linux, install the small CPU-only wheel
+# to avoid the ~2GB CUDA build (the Dockerfile does this automatically):
+#   pip install torch>=2.2 --index-url https://download.pytorch.org/whl/cpu
+torch>=2.2
 

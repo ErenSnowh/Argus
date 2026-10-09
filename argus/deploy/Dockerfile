@@ -25,15 +25,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
+# Install CPU-only PyTorch first, from the dedicated index, so the Linux image
+# ships the ~200MB CPU wheel instead of the ~2GB CUDA build. This satisfies the
+# torch>=2.2 pin in requirements.txt, which pip then won't re-resolve. With torch
+# present the container serves the committed neural checkpoint (engine="neural"),
+# not the heuristic fallback.
+RUN pip install --no-cache-dir torch>=2.2 --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Bake a trained model + sample pcap into the image so the container is
-# immediately demo-ready with zero post-deploy steps.
-# Bake a trained model + sample pcap into the image so the container is
+# Bake the RF model + sample pcap into the image so the container is
 # immediately demo-ready with zero post-deploy steps. --fast skips grid
 # search for a quicker image build; drop it for the fully-tuned model.
+# (The neural world-model checkpoint ships via COPY . . above — see
+# ml/pretrained/world_model.pt.)
 RUN python scripts/make_sample_pcap.py && python scripts/train_model.py --fast
 
 EXPOSE 8000

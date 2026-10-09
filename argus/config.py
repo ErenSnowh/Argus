@@ -69,8 +69,38 @@ if GOOGLE_API_KEY:
     os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
 
 
+# ---------------------------------------------------------------------------
+# Air-gap / offline switch.
+# Set OFFLINE=1 (also accepts true/yes/on, or ARGUS_OFFLINE=1) to guarantee
+# ARGUS makes NO outbound LLM calls. Two layers enforce this below:
+#   1. has_api_key() reports False, so every consumer falls back to the
+#      deterministic offline engine (heuristic world-model prior + local tools).
+#   2. The Google GenAI client is hard-blocked: generate_content and
+#      generate_content_stream raise instead of reaching the network.
+# This is what backs the "air-gap capable" claim — enforced in code, not just
+# documented. (In a true air-gap, also leave VIRUSTOTAL_API_KEY unset so the
+# optional IOC-enrichment HTTP path stays dormant.)
+# ---------------------------------------------------------------------------
+def _is_truthy(val) -> bool:
+    return str(val).strip().lower() in {"1", "true", "yes", "on"} if val is not None else False
+
+
+OFFLINE: bool = _is_truthy(os.environ.get("OFFLINE")) or _is_truthy(os.environ.get("ARGUS_OFFLINE"))
+
+
+def is_offline() -> bool:
+    """Return True when ARGUS is pinned to air-gapped/offline mode (OFFLINE=1)."""
+    return OFFLINE
+
+
 def has_api_key() -> bool:
-    """Return True if a valid-looking Gemini API key is available."""
+    """Return True if a valid-looking Gemini API key is available.
+
+    Always False in OFFLINE mode: no key is ever reported, so no consumer
+    (dashboard, CLI, live runner) attempts a live LLM call.
+    """
+    if OFFLINE:
+        return False
     return bool(GOOGLE_API_KEY and len(GOOGLE_API_KEY) > 10)
 
 
@@ -293,6 +323,24 @@ try:
 
     AsyncModels.generate_content = _patched_generate_content
     AsyncModels.generate_content_stream = _patched_generate_content_stream
+
+    # OFFLINE hard-block: if air-gap mode is on, replace the patched methods
+    # with blockers that refuse any outbound call. This runs last so it wins
+    # regardless of the retry/fallback wrapper above.
+    if OFFLINE:
+        _OFFLINE_MSG = (
+            "ARGUS is in OFFLINE mode (OFFLINE=1): outbound Gemini API calls are "
+            "blocked. Unset OFFLINE to enable the live agent pipeline."
+        )
+
+        async def _blocked_generate_content(self, *args, **kwargs):
+            raise RuntimeError(_OFFLINE_MSG)
+
+        async def _blocked_generate_content_stream(self, *args, **kwargs):
+            raise RuntimeError(_OFFLINE_MSG)
+
+        AsyncModels.generate_content = _blocked_generate_content
+        AsyncModels.generate_content_stream = _blocked_generate_content_stream
 
 except Exception as e:
     pass

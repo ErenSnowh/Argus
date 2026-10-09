@@ -57,6 +57,15 @@ async def run_live_incident(incident_description: str):
     CLI runner above and the dashboard's /api/investigate/live endpoint.
     Includes retry logic for transient 503 errors."""
 
+    if config.is_offline():
+        yield {
+            "author": "system",
+            "text": "ARGUS is in OFFLINE mode (OFFLINE=1): the live Gemini agent "
+                    "pipeline is disabled and no outbound call is made. Use the "
+                    "deterministic offline engine (/api/investigate) instead.",
+        }
+        return
+
     last_error = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:

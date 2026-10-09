@@ -7,7 +7,7 @@ CICIDS2017 flow records.
 
 Why synthetic data?
 The full CICIDS2017 dataset is several GB and requires a manual download from
-the Canadian Institute for Cybersecurity. For this capstone repo we generate a
+the Canadian Institute for Cybersecurity. For this repo we generate a
 smaller, reproducible synthetic dataset with the *same feature philosophy*
 (duration / packet-count / byte-count / inter-arrival-time / flag statistics)
 so the whole pipeline runs end-to-end with `python scripts/train_model.py`

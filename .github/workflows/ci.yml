@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  tests:
+    name: pytest (offline, no torch)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: argus
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: System deps (libpcap for scapy PCAP reading)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpcap-dev
+
+      # Install only the runtime + test dependencies from pyproject (no torch).
+      # The world-model unit tests skip automatically when torch is absent, so
+      # CI stays fast and the air-gap is enforced via OFFLINE=1 (no outbound
+      # calls, no API key needed).
+      - name: Install package + test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run test suite
+        env:
+          OFFLINE: "1"
+        run: pytest tests -q

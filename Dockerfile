@@ -20,6 +20,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpcap-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Install the small CPU-only PyTorch wheel BEFORE requirements.txt so the
+# torch>=2.2 pin there is already satisfied and pip does NOT pull the ~2GB CUDA
+# build. This is what lets the deployed demo load the committed neural
+# checkpoint (argus/ml/pretrained/world_model.pt) and report engine="neural"
+# instead of the heuristic fallback. On a 512MB free tier this is memory-tight;
+# the predictor falls back to the heuristic prior automatically if torch can't
+# load, so the demo never hard-fails.
+RUN pip install --no-cache-dir torch>=2.2 --index-url https://download.pytorch.org/whl/cpu
+
 # Install Python dependencies first (cached layer)
 COPY argus/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

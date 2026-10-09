@@ -20,13 +20,7 @@
 [![MITRE ATT&CK](https://img.shields.io/badge/MITRE-ATT%26CK_v14-FF6B6B?style=for-the-badge)](https://attack.mitre.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
-<!--
-  TODO before submission: paste your real demo-video URL in place of the "#"
-  in the Demo Video link below. The Live Demo URL is the one Render assigns to
-  the service named in render.yaml (argus-soc-agent); update it if you deploy
-  under a different name.
--->
-### 🔗 [🚀 Live Demo](https://argusforensics.onrender.com) · [🎥 Demo Video](#) · [💻 Source](https://github.com/ErenSnowh/Argus)
+### 🔗 [🚀 Live Demo](https://argusforensics.onrender.com) · [🎥 Demo Video](https://youtu.be/SAFx4Uk4VXw) · [💻 Source](https://github.com/ErenSnowh/Argus)
 
 <sub>⚠️ The live demo runs on Render's **free tier** — the first request after the service has been idle can take **30–60 s to cold-start** (the app isn't down, it's waking up). It serves the CPU neural engine where memory allows and falls back to the heuristic prior otherwise.</sub>
 
@@ -200,6 +194,13 @@ The real-data pipeline for training/evaluation is built on CIC-IDS-2017:
   windowed sequences in `argus/data/processed/` (gitignored, rebuilt locally);
   `python scripts/prepare_cicids2017.py --check` prints the manifest — per-day
   rows, label histogram, hosts, sequences per horizon.
+- **Time-grid convention:** the horizon heads are *step* offsets
+  `T+1/T+2/T+4/T+10` (`horizon_offsets` in `ml/world_model/features.py` and
+  `ml/world_model/model.py`); their names (`h30`…`h300`) assume the synthetic
+  generator's 30-second step, while this real-data pipeline bins at 60 seconds
+  (`ml/world_model/binning.py`, `bin_seconds=60`). Convention: a head means N
+  steps of the grid it is fed — on today's 60-s bins that is +1/+2/+4/+10
+  minutes; on the synthetic 30-s grid it is +30/60/120/300 s.
 - Missing values stay `NaN` + coverage flags — never zero-filled or imputed.
 
 ---
@@ -575,7 +576,7 @@ Argus/
     └── tests/
         ├── test_core.py              # Core pipeline, agents, guardrails, dashboard
         ├── test_pcap_bins.py         # Packet-bin extraction
-        └── test_prepare_cicids2017.py# Binned CIC-IDS-2017 pipeline (164 collected; 163 pass, 1 skips)
+        └── test_prepare_cicids2017.py# Binned CIC-IDS-2017 pipeline (164 collected; pass/skip split depends on torch — docs/EVALUATION.md §2)
 ```
 
 ---

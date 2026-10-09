@@ -258,11 +258,11 @@ The ARGUS web dashboard is a single-page SOC operations center with 5 interactiv
 
 | Tab | Functionality |
 |-----|---------------|
-| **SOC Radar** | Canvas radar sweep with multi-threat blip tracking, SHAP drivers, severity dials |
-| **World Model Forecaster** | Interactive K-step timeline with stage nodes, infiltration curves, engine badge (neural vs heuristic) |
-| **Knowledge Bases** | Search ATT&CK techniques, browse CAPEC patterns, query NVD CVEs |
-| **Dataset Inspector** | Browse records from the bundled synthetic fixtures; benchmark panel fills in once a committed results JSON exists |
-| **CII & NCIIPC** | Sector selection, SCADA/CBS attack simulation, advisory generation |
+| **Forecast & Radar** | CSV/PCAP upload → K-step fan chart with kill-chain stages, SHAP/attention driving features, engine badge (neural vs heuristic) |
+| **Counterfactual Sandbox** | Action-conditioned what-if simulation (BLOCK_SRC / BLOCK_DST_PORT / THROTTLE) with baseline-vs-mitigated risk delta |
+| **Multi-Agent Swarm** | Google ADK reasoning terminal: triage → enrichment → forensics → remediation → compliance → report |
+| **Statutory (CERT-In / NCIIPC)** | CII sector selection, CERT-In 6-hour draft report, NCIIPC Section 70A advisory generation |
+| **Benchmark Observatory** | Logistic Regression vs Random Forest vs World Model comparison, rendered from the committed `ml/pretrained/benchmark_results.json` |
 
 ```bash
 # Launch the dashboard

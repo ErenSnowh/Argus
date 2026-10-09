@@ -11,12 +11,9 @@
 | **Model parameters** | 619,803 |
 | **Architecture** | 4-layer causal Transformer, d_model=128, 4 heads, dim_ff=256 |
 | **Training device** | CPU |
-| **Epochs trained** | 26 (early stopping, patience=8) |
-| **Best val loss** | 0.4413 |
-| **Stage accuracy** | 99.8% |
-| **Infiltration AUC** | 0.975 |
-| **Training time** | 25.1 seconds |
-| **Committed** | 2026-10-08 |
+| **Training-run stats** (epochs, best val loss, stage accuracy, AUC, wall time) | **Not yet measured in-repo** — the training log JSON was not committed; rerun the *Reproduce* command below to record a fresh one |
+| **Quality metrics for this checkpoint** | Committed [`benchmark_results.json`](benchmark_results.json) — world-model macro-F1 0.9958 on the 400/100 synthetic split (provenance block inside) |
+| **Committed** | 2026-10-08 (`86e3de0`) |
 
 ## Reproduce
 
@@ -41,19 +38,19 @@ will be measured when the model is retrained on real CIC-IDS-2017 data (WP6).
 
 ## CIC-IDS-2017 Training (WP6 — pending)
 
+Data prep is done and verifiable:
+
 ```bash
 cd argus
-python scripts/prepare_cicids2017.py
-python -m ml.world_model.train \
-    --dataset cicids2018 \
-    --path data/processed/cicids2017_bins_60s.parquet \
-    --epochs 100 --seq-len 15
-cp ml/artifacts/world_model.pt ml/pretrained/world_model.pt
-python -m ml.world_model.benchmark \
-    --dataset cicids2018 \
-    --path data/processed/cicids2017_bins_60s.parquet
-cp ml/artifacts/benchmark_results.json ml/pretrained/benchmark_results.json
+python scripts/prepare_cicids2017.py          # bins + manifest (data gitignored)
+python scripts/prepare_cicids2017.py --check  # prints per-day rows, labels, sequences
 ```
+
+Training on those bins is **not wired yet**: `train.py --dataset cicids2018`
+routes to the raw-CSV loader and fails on `cicids2017_bins_60s.parquet`
+(`UnicodeDecodeError` — it is parquet, not CSV). The bin → sequence path exists
+in `ml/world_model/binning.py` (`make_sequences`); wiring it into the trainer
+is the remaining WP6 work tracked in `docs/plan/world-model-core.md`.
 
 Dataset source: Hugging Face `bvsam/cic-ids-2017` @ `70bac6246d99cf046186a02e1cce6883e2ffe7ea`
 File hashes and row counts: `argus/data/cicids2017_provenance.json`

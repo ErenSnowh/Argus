@@ -34,12 +34,14 @@ python scripts/train_model.py
 # World Model — synthetic validation (< 1 minute, no GPU needed)
 python -m ml.world_model.train --validate-supervision --sequences 500 --seq-len 10 --epochs 50
 
-# World Model — real CIC-IDS-2017 data (requires dataset download first)
+# CIC-IDS-2017 data prep: 60-s host/time bins + manifest (data stays gitignored)
 python scripts/prepare_cicids2017.py
-python -m ml.world_model.train \
-    --dataset cicids2018 \
-    --path data/processed/cicids2017_bins_60s.parquet \
-    --epochs 100 --seq-len 15
+python scripts/prepare_cicids2017.py --check     # prints the manifest, writes nothing
+
+# NOTE — training on the binned sequences is the remaining WP6 wiring:
+# train.py's --dataset loaders read raw CSVs (they fail on the bins parquet),
+# while the bin -> sequence path lives in ml/world_model/binning.py
+# (make_sequences). Track: docs/plan/world-model-core.md.
 ```
 
 After training, copy the checkpoint so it ships with the repo:
@@ -75,7 +77,7 @@ Open **http://localhost:8000** — no internet connection required.
 
 ### 4b. Upload a PCAP file
 
-1. Same flow with `data/sample_datasets/portscan/sample_portscan.pcap`
+1. Same flow with `data/sample_portscan.pcap`
 2. The backend extracts 46 features via Scapy and runs the forecast
 
 ### 4c. Counterfactual SOC decision
@@ -127,19 +129,22 @@ All tests should pass. The key test files:
 curl http://localhost:8000/api/health
 ```
 
-Expected response (after training):
+Expected response (after training, on a machine with PyTorch):
 
 ```json
 {
+  "status": "ok",
   "rf_model_trained": true,
   "world_model_trained": true,
   "torch_available": true,
-  "engine": "neural"
+  "world_model_source": "world_model.pt",
+  "offline": false
 }
 ```
 
-Without a checkpoint: `"world_model_trained": false, "engine": "heuristic"` — the
-heuristic Markov prior runs and the dashboard's ENGINE badge shows HEURISTIC.
+Without PyTorch or a checkpoint: `"world_model_trained": false` and
+`"world_model_source": null` — the heuristic Markov prior runs and the
+dashboard's ENGINE badge shows HEURISTIC.
 
 ---
 
@@ -171,9 +176,9 @@ heuristic Markov prior runs and the dashboard's ENGINE badge shows HEURISTIC.
 | `dashboard/app.py` | FastAPI backend (20+ endpoints) |
 | `dashboard/static/index.html` | Offline HTML5 dashboard |
 | `agents/orchestrator.py` | Google ADK multi-agent swarm |
-| `mcp_server/server.py` | FastMCP tool server (7 tools) |
+| `mcp_server/server.py` | FastMCP tool server (19 tools) |
 | `security/guardrails.py` | Hash-chained audit log + PII redaction |
-| `ml/artifacts/benchmark_report.md` | Current benchmark status |
+| `ml/pretrained/benchmark_results.json` | Committed benchmark results (synthetic split, with provenance) |
 
 ---
 

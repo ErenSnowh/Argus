@@ -69,11 +69,19 @@ curl -s -X POST https://argusforensics.onrender.com/api/forecast \
 
 ## 8. Benchmark numbers (Accuracy / Macro-F1 / AUC)
 
-**Not yet measured.** No committed `ml/pretrained/benchmark_results.json`
-exists. Once WP5/WP6 land, this file's results table will be rendered from
-that JSON (including its provenance block: dataset, git SHA, split protocol)
-by a script — not typed by hand. Until then, any benchmark figure appearing
-anywhere in the repo or slides is stale and must be ignored.
+Committed: `ml/pretrained/benchmark_results.json` (WP6, **synthetic** split —
+400 train / 100 test, `leakage_detected: false`, provenance block inside).
+Verify by reading the file, or re-run the harness:
+
+```bash
+cd argus
+python -m ml.world_model.benchmark --dataset synthetic --sequences 500
+```
+
+Any figure not in that JSON (real CIC-IDS-2017 PR-AUC lift, FPR on minority
+classes, early-warning lead time on real data) is **not yet measured** — the
+training wiring for the binned real data is pending WP6
+(`docs/plan/world-model-core.md`).
 
 ## 9. Stale-claim audit (run before any docs commit)
 

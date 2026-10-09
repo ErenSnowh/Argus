@@ -1,7 +1,7 @@
 # ARGUS — SIH 2026 Deck Content & Exact Numbers
 
 > **Problem Statement 26153** · *AI-based Network Attack Forecasting from Network Traffic Data using World Models* · Client: **NTRO / NCIIPC**
-> Source of every number below: `ml/artifacts/world_model_metrics.json` and `ml/pretrained/benchmark_results.json` (committed). **Data = synthetic** (honest label — real CIC-IDS-2017 run is prepared and pending; see last slide).
+> Source of every number below: `ml/pretrained/benchmark_results.json` (committed). Training-run statistics (best val loss, epochs, wall time) are **not quoted** — their log JSON was never committed. **Data = synthetic** (honest label — real CIC-IDS-2017 run is prepared and pending; see last slide).
 
 ---
 
@@ -55,7 +55,7 @@ Speaker note: This is the "world model" the problem statement names — borrowed
 
 ## SLIDE 5 — Architecture (exact spec)
 
-**Model:** 4-layer causal Transformer decoder
+**Model:** 4-layer Transformer encoder with a causal mask
 - `d_model = 128`, **4** attention heads, `dim_ff = 256`
 - **619,803** trainable parameters
 - 3 prediction heads + 4 horizon-anchor heads:
@@ -93,7 +93,7 @@ Every forecast carries a per-feature attribution, tagged with its method:
 
 ## SLIDE 8 — Results: training (synthetic validation run)
 
-> Honest framing: synthetic data is well-separated **by design** — its purpose is to prove the full neural pipeline learns end-to-end (all heads active, non-zero gradients). It is **not** a performance claim. Real-data numbers are one command away (last slide).
+> Honest framing: synthetic data is well-separated **by design** — its purpose is to prove the full neural pipeline learns end-to-end (all heads active, non-zero gradients). It is **not** a performance claim. Real-data numbers are pending the WP6 training wiring (last slide).
 
 | Metric | Value |
 |--------|-------|
@@ -101,12 +101,8 @@ Every forecast carries a per-feature attribution, tagged with its method:
 | Sequence length | 10 steps × 30s = 5 min |
 | Features | 46 |
 | Parameters | 619,803 |
-| Epochs | **26** (early stop, patience 8) |
-| Best validation loss | **0.4413** |
-| **Stage accuracy** | **99.8%** |
-| **Infiltration AUC** | **0.975** |
-| Training time | **25.1 s** (CPU) |
-| Supervision check | PASSED — all 3 heads active |
+| Epochs / best val loss / stage accuracy / AUC / training time | **Not yet measured in-repo** — training log JSON not committed (see `ml/pretrained/PROVENANCE.md`) |
+| Supervision check | PASSED on this machine (`--validate-supervision`); log not committed |
 
 ---
 
@@ -165,14 +161,8 @@ Speaker note: Do **not** claim ARGUS beats the baselines on accuracy here — it
 ## SLIDE 13 — Roadmap / honesty slide
 
 - **Done:** full neural pipeline trained + committed (synthetic checkpoint, WP6); dashboard, XAI, graph signals, compliance, benchmark harness all live.
-- **Next (one command — data already binned at `data/processed/cicids2017_bins_60s.parquet`):**
-  ```
-  python -m ml.world_model.train --dataset cicids2018 \
-      --path data/processed/cicids2017_bins_60s.parquet --epochs 100 --seq-len 15
-  python -m ml.world_model.benchmark --dataset cicids2018 \
-      --path data/processed/cicids2017_bins_60s.parquet
-  ```
-  → replaces synthetic numbers with real CIC-IDS-2017 PR-AUC lift, FPR on minority classes, and early-warning lead time.
+- **Next:** data is already binned at `data/processed/cicids2017_bins_60s.parquet` (rebuild: `python scripts/prepare_cicids2017.py`, verify: `--check`). Training on those bins is **not wired yet** — `train.py --dataset cicids2018` routes to the raw-CSV loader and fails on the parquet; the bin → sequence path (`ml/world_model/binning.py::make_sequences`) needs wiring into the trainer (remaining WP6 work, tracked in `docs/plan/world-model-core.md`).
+  → once wired: replaces synthetic numbers with real CIC-IDS-2017 PR-AUC lift, FPR on minority classes, and early-warning lead time.
 
 ---
 
@@ -180,7 +170,7 @@ Speaker note: Do **not** claim ARGUS beats the baselines on accuracy here — it
 
 - Params: 619,803 · Layers: 4 · d_model: 128 · heads: 4 · dim_ff: 256
 - Loss weights: state 0.25 / stage 0.30 / infiltration 0.25 / horizon 0.20
-- Best val loss 0.4413 · stage acc 99.8% · infiltration AUC 0.975 · 26 epochs · 25.1s CPU
+- Training-run stats (best val loss / stage acc / AUC / epochs / wall time): **not yet measured in-repo** — training log JSON not committed
 - Benchmark winner on synthetic: RF (F1 1.0); WM F1 0.9958; WM−RF F1 = −0.0042; WM−LR F1 = −0.0003
 - WM lead time: mean 0.7s, BruteForce 4.3s; early-warning rate 1.1% (synthetic)
 - 46 features = 24 flow + 6 extended + 8 packet + 8 topology

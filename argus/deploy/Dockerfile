@@ -30,7 +30,7 @@ COPY requirements.txt .
 # torch>=2.2 pin in requirements.txt, which pip then won't re-resolve. With torch
 # present the container serves the committed neural checkpoint (engine="neural"),
 # not the heuristic fallback.
-RUN pip install --no-cache-dir torch>=2.2 --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir "torch>=2.2" --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .

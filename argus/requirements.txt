@@ -17,6 +17,6 @@ pyarrow>=17.0
 # (ml/pretrained/world_model.pt) so the live demo reports engine="neural"
 # instead of the heuristic fallback. On Linux, install the small CPU-only wheel
 # to avoid the ~2GB CUDA build (the Dockerfile does this automatically):
-#   pip install torch>=2.2 --index-url https://download.pytorch.org/whl/cpu
+#   pip install "torch>=2.2" --index-url https://download.pytorch.org/whl/cpu
 torch>=2.2
 

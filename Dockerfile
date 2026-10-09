@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # instead of the heuristic fallback. On a 512MB free tier this is memory-tight;
 # the predictor falls back to the heuristic prior automatically if torch can't
 # load, so the demo never hard-fails.
-RUN pip install --no-cache-dir torch>=2.2 --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir "torch>=2.2" --index-url https://download.pytorch.org/whl/cpu
 
 # Install Python dependencies first (cached layer)
 COPY argus/requirements.txt .

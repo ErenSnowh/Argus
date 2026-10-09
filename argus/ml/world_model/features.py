@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 
 # ---------------------------------------------------------------------------
-# Combined feature schema: 30 flow-level + 8 packet-level = 38 features
+# Combined feature schema: 24 flow + 6 extended + 8 packet + 8 topology = 46 features
 # ---------------------------------------------------------------------------
 
 # Original 24 flow-level features from the RF classifier
